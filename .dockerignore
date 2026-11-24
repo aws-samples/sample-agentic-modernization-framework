@@ -1,0 +1,57 @@
+# Docker build context exclusions
+# Only backend/ and pyproject.toml are needed for the worker image
+
+.git
+.venv
+backend/.venv
+frontend/
+docs/
+infra/
+scripts/
+input/
+.kiro/
+.vscode/
+.claude/
+.gitlab/
+# Local presentations / previews (large, not source)
+*.pptx
+apg-pattern*.html
+docker/docker-compose*.yml
+
+# Python artifacts
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.hypothesis
+htmlcov/
+.coverage
+*.egg-info
+
+# Environment / secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Terraform
+*.tfstate
+*.tfstate.backup
+*.tfvars
+*.tfplan
+.terraform/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+*.swp
+*.log
+
+# Markdown (except backend code that may reference .md templates)
+*.md
+!backend/**/*.md
+
+# Node
+node_modules/

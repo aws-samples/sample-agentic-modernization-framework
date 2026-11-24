@@ -1,0 +1,48 @@
+# Checkov configuration for ASH.
+#
+# Referenced by ash_config.yaml (scanners.checkov.options.config_file).
+#
+# These skips cover Lambda hardening checks for the DEMO deployment of the
+# platform "tool" Lambdas (infra/environments/agentcore/lambdas.tf). Each is a
+# production gate to re-enable before production cutover, consistent with the
+# public-hosting.tf suppressions in ash_config.yaml (expiration 2026-12-03 (re-dated 2026-11-03)).
+# Rationale: these Lambdas run short-lived demo workloads, reach public AWS and
+# GitHub endpoints, share one least-privilege IAM role, and are invoked only via
+# the IAM-scoped AgentCore gateway — not exposed publicly.
+skip-check:
+  - CKV_AWS_115  # reserved concurrency — set per-function limits before production
+  - CKV_AWS_116  # dead-letter queue — add DLQ for async failure capture before production
+  - CKV_AWS_117  # VPC deployment — Lambdas use public AWS/GitHub endpoints; add VPC + endpoints before production
+  - CKV_AWS_272  # code-signing — add a Lambda code-signing config before production
+
+  # ── DEMO deployment hardening deferrals (production gates — re-enable before ──
+  # cutover, expiration 2026-12-03 (re-dated 2026-11-03)). These cover the platform infra in
+  # infra/environments/agentcore + infra/modules for the single-account demo:
+  # broad-by-design IAM, no customer-managed KMS, CloudFront-origin-only ALB, and
+  # observability/DR not yet wired. Consolidated here (global, drift-proof) rather
+  # than as line-anchored ash_config suppressions, which drift when files change.
+  # Each is documented in CLAUDE.md's "Deferred" section and infra/CLAUDE.md.
+  # Networking / edge (ALB is CloudFront-origin-only; WAF is IP-allowlist)
+  - CKV_AWS_192  # WAF managed Log4j rule — add before production
+  - CKV2_AWS_28  # ALB WAF association — protected at CloudFront for demo
+  - CKV2_AWS_31  # WAF logging destination — add before production
+  - CKV2_AWS_32  # CloudFront response-headers security policy — add before production
+  - CKV2_AWS_47  # WAF Log4j managed rule — add before production
+  - CKV2_AWS_11  # VPC flow logs — add before production
+  - CKV2_AWS_12  # default SG restrictions — tighten before production
+  - CKV2_AWS_5   # SG attached-to-resource — false positive on module-exported SGs
+  - CKV_AWS_394  # API Gateway / edge control — add before production
+  # IAM (deliberately broad for the demo — see CLAUDE.md)
+  - CKV_AWS_289  # IAM no full-admin — scope down before production
+  # Encryption at rest with customer-managed KMS (demo uses AWS-managed keys)
+  - CKV_AWS_145  # S3 KMS CMK — demo uses SSE-S3; add CMK before production
+  # S3 durability/audit for demo buckets
+  - CKV_AWS_18   # S3 access logging — add before production
+  - CKV_AWS_21   # S3 versioning — add before production
+  - CKV_AWS_144  # S3 cross-region replication (DR) — add before production
+  - CKV2_AWS_61  # S3 lifecycle configuration — add before production
+  - CKV2_AWS_62  # S3 event notifications — add before production
+  # Data / compute / observability
+  - CKV_AWS_338  # CloudWatch Logs 1-year retention — set before production
+  - CKV_AWS_284  # Step Functions execution-data logging — enable before production
+  - CKV_AWS_51   # ECR immutable image tags — demo deploys :latest; pin digests before production

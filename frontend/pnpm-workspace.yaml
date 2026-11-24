@@ -1,0 +1,10 @@
+# pnpm settings (pnpm 10 reads these here; pnpm 11 reads only this file).
+onlyBuiltDependencies:
+  - esbuild
+allowBuilds:
+  esbuild: true
+  core-js: false
+overrides:
+  # Transitive security fixes: katex via mermaid 11, @babel/core via @vitejs/plugin-react.
+  katex: ^0.18.2
+  '@babel/core': ^7.29.1

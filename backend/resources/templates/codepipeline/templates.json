@@ -1,0 +1,246 @@
+[
+  {
+    "id": "codepipeline-buildspec-java-maven",
+    "name": "CodeBuild buildspec — Java + Maven",
+    "type": "ci",
+    "provider": "codepipeline",
+    "description": "CodeBuild buildspec (committed to cicd/buildspec.yml; run by the codepipeline module): Build + unit tests + JaCoCo coverage gate; container targets: Docker build + ECR push + imagedefinitions.json; EC2 targets: artifact upload to S3 + CodeDeploy revision; Lambda targets: function package upload + update-function-code + smoke invoke",
+    "file": "buildspec-java-maven.yml",
+    "output_path": "cicd/buildspec.yml",
+    "language": "java",
+    "build_tool": "maven",
+    "variables": [
+      "app_name",
+      "aws_region",
+      "ecr_repo",
+      "java_version",
+      "container_name",
+      "build_dir",
+      "coverage_threshold",
+      "coverage_reason",
+      "artifact_bucket",
+      "function_name",
+      "health_check_path",
+      "smoke_function",
+      "smoke_path"
+    ]
+  },
+  {
+    "id": "codepipeline-buildspec-java-gradle",
+    "name": "CodeBuild buildspec — Java + Gradle",
+    "type": "ci",
+    "provider": "codepipeline",
+    "description": "CodeBuild buildspec for Gradle builds (wrapper when present): build + unit tests + JaCoCo coverage gate (init script, build file untouched); container targets: Docker build + ECR push + imagedefinitions.json; EC2 targets: artifact upload to S3 + CodeDeploy revision; Lambda targets: function package upload + update-function-code + smoke invoke",
+    "file": "buildspec-java-gradle.yml",
+    "output_path": "cicd/buildspec.yml",
+    "language": "java",
+    "build_tool": "gradle",
+    "variables": [
+      "app_name",
+      "aws_region",
+      "ecr_repo",
+      "java_version",
+      "container_name",
+      "build_dir",
+      "coverage_threshold",
+      "coverage_reason",
+      "artifact_bucket",
+      "function_name",
+      "health_check_path",
+      "smoke_function",
+      "smoke_path"
+    ]
+  },
+  {
+    "id": "codepipeline-buildspec-node-npm",
+    "name": "CodeBuild buildspec — Node.js + npm",
+    "type": "ci",
+    "provider": "codepipeline",
+    "description": "CodeBuild buildspec (committed to cicd/buildspec.yml; run by the codepipeline module): Build, lint, unit tests + c8 coverage gate; container targets: Docker build + ECR push + imagedefinitions.json; EC2 targets: artifact upload to S3 + CodeDeploy revision; Lambda targets: function package upload + update-function-code + smoke invoke",
+    "file": "buildspec-node-npm.yml",
+    "output_path": "cicd/buildspec.yml",
+    "language": "javascript",
+    "build_tool": "npm",
+    "variables": [
+      "app_name",
+      "aws_region",
+      "ecr_repo",
+      "node_version",
+      "container_name",
+      "build_dir",
+      "coverage_threshold",
+      "artifact_bucket",
+      "function_name",
+      "health_check_path",
+      "smoke_function",
+      "smoke_path"
+    ]
+  },
+  {
+    "id": "codepipeline-buildspec-python-pip",
+    "name": "CodeBuild buildspec — Python + pip",
+    "type": "ci",
+    "provider": "codepipeline",
+    "description": "CodeBuild buildspec (committed to cicd/buildspec.yml; run by the codepipeline module): Lint, unit tests + coverage.py gate; container targets: Docker build + ECR push + imagedefinitions.json; EC2 targets: artifact upload to S3 + CodeDeploy revision; Lambda targets: function package upload + update-function-code + smoke invoke",
+    "file": "buildspec-python-pip.yml",
+    "output_path": "cicd/buildspec.yml",
+    "language": "python",
+    "build_tool": "pip",
+    "variables": [
+      "app_name",
+      "aws_region",
+      "ecr_repo",
+      "python_version",
+      "container_name",
+      "build_dir",
+      "coverage_threshold",
+      "artifact_bucket",
+      "function_name",
+      "health_check_path",
+      "smoke_function",
+      "smoke_path"
+    ]
+  },
+  {
+    "id": "codepipeline-cd-ecs",
+    "name": "CD — Deploy to ECS (CodePipeline)",
+    "type": "cd",
+    "provider": "codepipeline",
+    "description": "Pipeline (CodeCommit default branch → CodeBuild running cicd/buildspec.yml → ECS) + ECS Deploy stage are provisioned by the Terraform `codepipeline` module (CodeCommit → CodeBuild → ECS). Deploy stage consumes imagedefinitions.json from the build artifact — no additional YAML is required.",
+    "file": "cd-ecs.yml",
+    "output_path": "CODEPIPELINE_DEPLOY_NOTE.md",
+    "target": "ecs",
+    "variables": [
+      "app_name",
+      "branch",
+      "ecs_cluster",
+      "ecs_service",
+      "container_name"
+    ]
+  },
+  {
+    "id": "codepipeline-dockerfile-java",
+    "name": "Dockerfile — Java (Corretto, non-root)",
+    "type": "container",
+    "provider": "codepipeline",
+    "description": "Emitted into the build module ONLY when it has no Dockerfile: Amazon Corretto (multi-arch) base, runs the jar the buildspec copies to build/app.jar as a non-root user, with a HEALTHCHECK on the app health path.",
+    "file": "Dockerfile-java",
+    "output_path": "Dockerfile",
+    "language": "java",
+    "variables": [
+      "app_name",
+      "java_version",
+      "container_port",
+      "health_check_path"
+    ]
+  },
+  {
+    "id": "codepipeline-cd-ec2",
+    "name": "CD — Deploy to EC2 via CodeDeploy (CodePipeline)",
+    "type": "cd",
+    "provider": "codepipeline",
+    "description": "Deploy stage is the Terraform `codepipeline` module's CodeDeploy action (deploy_target=ec2): in-place, one instance at a time behind the ALB, auto-rollback. The buildspec assembles the revision from cicd/codedeploy/.",
+    "file": "cd-ec2.yml",
+    "output_path": "CODEPIPELINE_DEPLOY_NOTE.md",
+    "target": "ec2",
+    "variables": [
+      "app_name",
+      "branch",
+      "install_dir",
+      "service_name",
+      "container_port",
+      "health_check_path"
+    ]
+  },
+  {
+    "id": "codepipeline-cd-lambda",
+    "name": "CD — Deploy to Lambda (CodePipeline)",
+    "type": "cd",
+    "provider": "codepipeline",
+    "description": "No Deploy stage (deploy_target=lambda): the buildspec uploads the function package, runs update-function-code --publish and smoke-invokes the health path.",
+    "file": "cd-lambda.yml",
+    "output_path": "CODEPIPELINE_DEPLOY_NOTE.md",
+    "target": "lambda",
+    "variables": [
+      "app_name",
+      "branch",
+      "artifact_bucket",
+      "function_name",
+      "health_check_path",
+      "smoke_function",
+      "smoke_path"
+    ]
+  },
+  {
+    "id": "codepipeline-codedeploy-appspec",
+    "name": "CodeDeploy revision — appspec.yml",
+    "type": "codedeploy",
+    "provider": "codepipeline",
+    "description": "CodeDeploy AppSpec: copy app/ to install_dir, stop/start the systemd unit, validate the health path",
+    "file": "codedeploy-appspec.yml",
+    "output_path": "cicd/codedeploy/appspec.yml",
+    "target": "ec2",
+    "variables": [
+      "app_name",
+      "branch",
+      "install_dir",
+      "service_name",
+      "container_port",
+      "health_check_path"
+    ]
+  },
+  {
+    "id": "codepipeline-codedeploy-application_stop",
+    "name": "CodeDeploy revision — application_stop.sh",
+    "type": "codedeploy",
+    "provider": "codepipeline",
+    "description": "ApplicationStop hook: stop the systemd unit (absent unit is not an error)",
+    "file": "codedeploy-application_stop.sh",
+    "output_path": "cicd/codedeploy/scripts/application_stop.sh",
+    "target": "ec2",
+    "variables": [
+      "app_name",
+      "branch",
+      "install_dir",
+      "service_name",
+      "container_port",
+      "health_check_path"
+    ]
+  },
+  {
+    "id": "codepipeline-codedeploy-application_start",
+    "name": "CodeDeploy revision — application_start.sh",
+    "type": "codedeploy",
+    "provider": "codepipeline",
+    "description": "ApplicationStart hook: restart the systemd unit (fails if the unit is missing)",
+    "file": "codedeploy-application_start.sh",
+    "output_path": "cicd/codedeploy/scripts/application_start.sh",
+    "target": "ec2",
+    "variables": [
+      "app_name",
+      "branch",
+      "install_dir",
+      "service_name",
+      "container_port",
+      "health_check_path"
+    ]
+  },
+  {
+    "id": "codepipeline-codedeploy-validate_service",
+    "name": "CodeDeploy revision — validate_service.sh",
+    "type": "codedeploy",
+    "provider": "codepipeline",
+    "description": "ValidateService hook: health path must answer 200 on localhost",
+    "file": "codedeploy-validate_service.sh",
+    "output_path": "cicd/codedeploy/scripts/validate_service.sh",
+    "target": "ec2",
+    "variables": [
+      "app_name",
+      "branch",
+      "install_dir",
+      "service_name",
+      "container_port",
+      "health_check_path"
+    ]
+  }
+]

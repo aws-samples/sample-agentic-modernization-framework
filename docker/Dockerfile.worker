@@ -1,0 +1,166 @@
+# kics-scan disable=02d9c71f-3ee8-4986-9c27-1a20d0d19bfc,965a08d7-ef86-4f14-8792-4a3b2098937e,aa93e17f-b6db-4162-9334-c70334e7ac28,b16e8501-ef3c-44e1-a543-a093238099c9
+# Accepted kics findings for this file (scanner suppressions; reasons):
+#   02d9c71f: pip self-upgrade; app dependencies are pinned in pyproject.toml
+#   965a08d7: Debian packages track the base image's security updates; image is rebuilt per deploy
+#   aa93e17f: app files belong to the runtime user; untrusted builds run as a separate builduser
+#   b16e8501: Fargate runs linux/amd64; pinned so builds on arm64 hosts work
+# checkov:skip=CKV2_DOCKER_1:sudo is the sandbox boundary — its ONLY rule lets atxuser run repo build code as the unprivileged builduser (never root; asserted at build time below). See worker/sandbox.py.
+# Assessment Worker Container
+# Runs migration pipelines: assessment, workbench, and design document generation
+# Launched as ECS Fargate task — mode selected via MODE env var
+
+FROM --platform=linux/amd64 public.ecr.aws/docker/library/python:3.12-slim AS base
+
+# Install system dependencies (git for cloning, sudo for the build-user switch)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl unzip ca-certificates gnupg sudo \
+    && rm -rf /var/lib/apt/lists/*
+
+# Every third-party download below is pinned to a version AND its published checksum (sha256sum -c
+# fails the build on any mismatch). Bump a version together with its *_SHA* value from the vendor's
+# checksum file (nodejs.org SHASUMS256.txt, HashiCorp *_SHA256SUMS, Apache *.sha512).
+
+# Node.js (ATX CLI runtime; Node app builds) — official tarball, no remote setup script.
+ARG NODE_VERSION=20.20.2
+ARG NODE_SHA256=19e56f0825510207dd904f087fe52faa0a4eb6b2aab5f0ea7a33830d04888b8b
+RUN curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz" -o /tmp/node.tar.gz \
+    && echo "${NODE_SHA256}  /tmp/node.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/node.tar.gz -C /usr/local --strip-components=1 --no-same-owner \
+    && rm /tmp/node.tar.gz \
+    && node --version && npm --version
+
+# Install AWS CLI v2
+RUN curl -s "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/awscliv2.zip" \
+    && unzip -q /tmp/awscliv2.zip -d /tmp \
+    && /tmp/aws/install \
+    && rm -rf /tmp/aws /tmp/awscliv2.zip
+
+# Terraform CLI — required for MODE=infra to run `terraform validate` + `plan`
+# on the generated IaC (backend/src/worker/terraform_runner.py) and capture the
+# output to S3. Pinned to keep runs reproducible. Same ARG name as the CI's
+# TF_VERSION (.gitlab/ci/variables.yml), but NOT the same value yet: the worker
+# stays on 1.9.8 until a deliberate bump (override: --build-arg TF_VERSION=...).
+ARG TF_VERSION=1.9.8
+ARG TF_SHA256=186e0145f5e5f2eb97cbd785bc78f21bae4ef15119349f6ad4fa535b83b10df8
+RUN curl -fsSL "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip" \
+      -o /tmp/terraform.zip \
+    && echo "${TF_SHA256}  /tmp/terraform.zip" | sha256sum -c - \
+    && unzip -q /tmp/terraform.zip -d /usr/local/bin \
+    && chmod 755 /usr/local/bin/terraform \
+    && rm /tmp/terraform.zip \
+    && terraform version
+
+# Java toolchain — required for ATX to VERIFY a transformation, not just write it.
+#
+# Without this, ATX transforms the code and then reports
+#   "Maven is not installed in the environment (/bin/sh: 1: mvn: not found)"
+#   "Build verification cannot be performed due to missing build toolchain"
+# so the run produces modernised source that has never been compiled. The
+# transform still "succeeds", which is precisely the kind of unverified success
+# this pipeline should not report.
+#
+# Corretto 21 specifically: Java 21 targets need it, and a JDK 17
+# cannot compile a Java 21 target. Debian bookworm's default-jdk is 17, hence
+# the Corretto apt repository rather than the distro package.
+RUN curl -fsSL https://apt.corretto.aws/corretto.key | gpg --dearmor -o /usr/share/keyrings/corretto-keyring.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/corretto-keyring.gpg] https://apt.corretto.aws stable main" \
+       > /etc/apt/sources.list.d/corretto.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
+       java-21-amazon-corretto-jdk \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG MAVEN_VERSION=3.9.9
+ARG MAVEN_SHA512=a555254d6b53d267965a3404ecb14e53c3827c09c3b94b5678835887ab404556bfaf78dcfe03ba76fa2508649dca8531c74bca4d5846513522404d48e8c4ac8b
+RUN curl -fsSL "https://archive.apache.org/dist/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz" \
+      -o /tmp/maven.tar.gz \
+    && echo "${MAVEN_SHA512}  /tmp/maven.tar.gz" | sha512sum -c - \
+    && tar -xzf /tmp/maven.tar.gz -C /opt \
+    && ln -s "/opt/apache-maven-${MAVEN_VERSION}/bin/mvn" /usr/local/bin/mvn \
+    && chmod -R a+rX "/opt/apache-maven-${MAVEN_VERSION}" \
+    && rm /tmp/maven.tar.gz
+
+ENV JAVA_HOME="/usr/lib/jvm/java-21-amazon-corretto"
+ENV MAVEN_HOME="/opt/apache-maven-${MAVEN_VERSION}"
+
+# Fail the build here rather than discovering at transform time that the
+# toolchain is absent — the failure mode this layer exists to prevent was
+# invisible until the ATX log capture was fixed.
+RUN java -version && mvn -version && test -d "$JAVA_HOME"
+
+# Create non-root user
+RUN useradd -m -s /bin/bash atxuser \
+    && mkdir -p /atx-workspace \
+    && chown atxuser:atxuser /atx-workspace
+
+# Build isolation. Repo-controlled build/scan code (mvn, ./gradlew,
+# pip, ruff, pytest — backend/src/worker/sandbox.py) runs as `builduser`, a second unprivileged uid:
+# it can't read atxuser's /proc/<pid>/environ (the task-role credential URI) or atxuser's home.
+# - `buildshare` is builduser's primary group; atxuser is a member, so clones (group buildshare,
+#   g+rwX, setgid dirs) are writable by both. builduser's Maven/Gradle/pip caches live in its
+#   own home (~/.m2, ~/.gradle, ~/.cache), never in atxuser's ~/.m2.
+# - The ONLY sudo rule: atxuser may run commands as builduser (never as root). SETENV lets the worker
+#   hand over its explicit, credential-free env (`sudo --preserve-env=<list>`).
+RUN groupadd --system buildshare \
+    && useradd --create-home --home-dir /home/builduser --shell /usr/sbin/nologin --gid buildshare builduser \
+    && usermod -aG buildshare atxuser \
+    && mkdir -p /home/builduser/.m2 /home/builduser/.gradle /home/builduser/.cache \
+    && chown -R builduser:buildshare /home/builduser \
+    && chmod 700 /home/builduser \
+    && printf 'atxuser ALL=(builduser) NOPASSWD:SETENV: ALL\n' > /etc/sudoers.d/builduser \
+    && chmod 0440 /etc/sudoers.d/builduser \
+    && visudo -cf /etc/sudoers.d/builduser \
+    && visudo -c \
+    && ! id -nG builduser | tr ' ' '\n' | grep -qxE 'sudo|root|atxuser' \
+    && runuser -u atxuser -- sudo -n -u builduser -- true \
+    && ! runuser -u atxuser -- sudo -n -u root -- true 2>/dev/null \
+    && runuser -u builduser -- sh -c 'command -v java mvn python3 node git timeout' >/dev/null
+
+# Install ATX CLI as atxuser
+USER atxuser
+RUN curl -fsSL https://transform-cli.awsstatic.com/install.sh | bash
+
+# Switch to root to symlink ATX into PATH
+USER root
+RUN ln -sf /home/atxuser/.atx/bin/atx /usr/local/bin/atx 2>/dev/null || true \
+    && find /home/atxuser -name "atx" -type f 2>/dev/null | head -1 | xargs -I{} ln -sf {} /usr/local/bin/atx 2>/dev/null || true \
+    && chmod 755 /usr/local/bin/atx \
+    && mkdir -p /root/.aws/atx && chmod -R 777 /root/.aws/atx
+
+# Verify ATX is installed
+RUN which atx
+
+# Create app directory
+USER atxuser
+RUN mkdir -p /home/atxuser/app
+WORKDIR /home/atxuser/app
+
+# Copy project config and install Python dependencies
+COPY --chown=atxuser:atxuser pyproject.toml ./pyproject.toml
+COPY --chown=atxuser:atxuser backend/__init__.py ./backend/__init__.py
+COPY --chown=atxuser:atxuser backend/src/__init__.py ./backend/src/__init__.py
+RUN python3 -m venv .venv \
+    && .venv/bin/pip install --no-cache-dir --upgrade pip \
+    && .venv/bin/pip install --no-cache-dir .
+
+# Copy backend source
+COPY --chown=atxuser:atxuser backend/ ./backend/
+
+# Set Python path
+ENV PYTHONPATH="/home/atxuser/app"
+ENV PYTHONUNBUFFERED=1
+ENV HOME="/home/atxuser"
+ENV PATH="/home/atxuser/.atx/bin:/home/atxuser/app/.venv/bin:${PATH}"
+
+# atxuser's home (~/.gitconfig, ~/.aws, the app venv) is closed to builduser (R9.1).
+USER root
+RUN chmod 700 /home/atxuser \
+    && test "$(stat -c %a /home/atxuser)" = 700 \
+    && ! runuser -u builduser -- ls /home/atxuser >/dev/null 2>&1
+USER atxuser
+
+# This image runs one-shot ECS tasks and exits; it does not expose a service
+# endpoint for Docker to probe. ECS task exit status is the health signal.
+HEALTHCHECK NONE
+
+# Entrypoint: run the migration worker
+ENTRYPOINT ["/home/atxuser/app/.venv/bin/python", "-m", "backend.src.worker.main"]

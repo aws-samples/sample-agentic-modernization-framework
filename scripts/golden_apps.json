@@ -1,0 +1,128 @@
+{
+  "_comment": "Golden apps for scripts/e2e_golden.py. Proven end to end on 2026-10-21/22. Wiring hints are deliberately absent: Assessment must detect them. target_account is not stored here: e2e_golden.py injects --target-account / GOLDEN_TARGET_ACCOUNT, else the STS caller account.",
+  "apps": {
+    "APP-MUSIC": {
+      "create": {
+        "app_name": "Music API (Flask)",
+        "business_unit": "Media",
+        "language": "Python",
+        "framework": "Flask",
+        "architecture": "monolith",
+        "description": "Flask REST API (90s best-music catalogue) on a single on-prem Docker host, Python 3.8 (EOL), DynamoDB-backed. Candidate: replatform to ECS Fargate.",
+        "repos": [
+          {
+            "name": "deploy-python-flask-microservices-to-aws-using-open-source-tools-part2",
+            "url": "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/deploy-python-flask-microservices-to-aws-using-open-source-tools-part2",
+            "branch": "atx-rnd2",
+            "language": "Python"
+          }
+        ],
+        "tier": "tier_3",
+        "compliance": [
+          "none"
+        ],
+        "rpo": "4 hours",
+        "rto": "8 hours",
+        "uptime_sla": "99.9%",
+        "target_region": "us-east-1",
+        "data_classification": "internal",
+        "deployment_method": "manual",
+        "owners": [
+          {
+            "name": "AMF Golden",
+            "email": "amf-golden@example.com",
+            "role": "tech_lead"
+          }
+        ]
+      },
+      "put": {
+        "current_compute": "on-prem Docker host (single VM)",
+        "containerization": "partial (Docker)",
+        "database": {
+          "engine": "DynamoDB",
+          "size_gb": 1,
+          "licensing": "managed"
+        },
+        "deploy_branch": "migration/app-music",
+        "current_cost": {
+          "monthly_infra": 400,
+          "annual_license": 0
+        }
+      },
+      "discovery_strategy": "replatform",
+      "assessment_inputs": {
+        "target_compute": "ecs_fargate",
+        "target_database": "dynamodb",
+        "cicd_target": "codepipeline",
+        "vpc_cidr": "10.40.0.0/16",
+        "ami_id": "",
+        "db_instance_class": "",
+        "transformation_steps": [
+          "AWS/python-version-upgrade"
+        ]
+      }
+    },
+    "APP-MOVIES": {
+      "create": {
+        "app_name": "Movies Ingest API (Lambda)",
+        "business_unit": "Media",
+        "language": "Python",
+        "framework": "AWS Lambda handler",
+        "architecture": "serverless",
+        "description": "Event-style ingest function (index.handler) that writes movie records to DynamoDB, currently run by a cron/HTTP shim on an on-prem VM. Candidate: replatform to Lambda + HTTP API.",
+        "repos": [
+          {
+            "name": "aws-cdk-examples",
+            "url": "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/aws-cdk-examples",
+            "branch": "atx-rnd2",
+            "language": "Python"
+          }
+        ],
+        "tier": "tier_3",
+        "compliance": [
+          "none"
+        ],
+        "rpo": "4 hours",
+        "rto": "8 hours",
+        "uptime_sla": "99.9%",
+        "target_region": "us-east-1",
+        "data_classification": "internal",
+        "deployment_method": "manual",
+        "owners": [
+          {
+            "name": "AMF Golden",
+            "email": "amf-golden@example.com",
+            "role": "tech_lead"
+          }
+        ]
+      },
+      "put": {
+        "current_compute": "on-prem VM (cron + HTTP shim)",
+        "containerization": "none",
+        "database": {
+          "engine": "DynamoDB",
+          "size_gb": 1,
+          "licensing": "managed"
+        },
+        "build_dir": "python/apigw-http-api-lambda-dynamodb-python-cdk/lambda/apigw-handler",
+        "deploy_branch": "migration/app-movies",
+        "current_cost": {
+          "monthly_infra": 250,
+          "annual_license": 0
+        }
+      },
+      "discovery_strategy": "replatform",
+      "assessment_inputs": {
+        "target_compute": "lambda",
+        "target_database": "dynamodb",
+        "cicd_target": "codepipeline",
+        "vpc_cidr": "10.41.0.0/16",
+        "ami_id": "",
+        "db_instance_class": "",
+        "transformation_steps": [
+          "AWS/python-version-upgrade"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,1747 @@
+{
+  "Comment": "AMF Migration v2 \u2014 Discovery -> [7R Choice] -> Assessment -> Design -> Execution(sub-steps) -> Validation -> Cutover -> Handover, with waitForTaskToken approval gates and ATX callbacks.",
+  "QueryLanguage": "JSONata",
+  "StartAt": "PreHook_Discovery",
+  "States": {
+    "PreHook_Discovery": {
+      "Type": "Task",
+      "Comment": "Deterministic pre-hook: verify Discovery preconditions (app exists, app_name set, at least one repo linked) BEFORE running the phase. Reads persisted state only.",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Arguments": {
+        "FunctionName": "${InvokeRuntimeFn}",
+        "Payload": {
+          "mode": "prehook_phase",
+          "phase": "discovery",
+          "app_id": "{% $states.input.app_id %}"
+        }
+      },
+      "Output": "{% $merge([$states.input, {'ready': $states.result.Payload.ready, 'prehook': $states.result.Payload}]) %}",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "MarkFailed"
+        }
+      ],
+      "Next": "PreCheck_Discovery"
+    },
+    "PreCheck_Discovery": {
+      "Type": "Choice",
+      "Comment": "Gate entry to Discovery on the pre-hook result: proceed when ready, else fail fast with the recorded blockers.",
+      "Choices": [
+        {
+          "Condition": "{% $states.input.ready = true %}",
+          "Next": "Discovery"
+        }
+      ],
+      "Default": "MarkFailed"
+    },
+    "Discovery": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::bedrockagentcore:invokeHarness",
+      "Arguments": {
+        "HarnessArn": "${HarnessArn}",
+        "RuntimeSessionId": "{% $uuid() %}",
+        "Messages": [
+          {
+            "Content": [
+              {
+                "Text": "{% 'Application: ' & $states.input.app_id & '. Run discovery. MUST call: 1) portfolio___get_app_context. 2) strategy___calculate_completeness. 3) strategy___recommend_strategy (you MUST call this; it OVERWRITES migration_strategy + strategy_confidence). 4) portfolio___update_app_field field=status value=discovered. Report the strategy, confidence %, completeness %, and gaps.' %}"
+              }
+            ],
+            "Role": "user"
+          }
+        ],
+        "TimeoutSeconds": 600
+      },
+      "Output": {
+        "app_id": "{% $states.input.app_id %}",
+        "response": "{% $states.result.Output.Message.Content[0].Text %}"
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "BedrockAgentCore.ThrottlingException"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        },
+        {
+          "Comment": "Transient AgentCore 5xx (e.g. HTTP 502 before the Harness starts): retry instead of failing the run.",
+          "ErrorEquals": [
+            "BedrockAgentCore.BedrockAgentCoreException",
+            "BedrockAgentCore.InternalServerException",
+            "BedrockAgentCore.ServiceUnavailableException"
+          ],
+          "IntervalSeconds": 15,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "MarkFailed"
+        }
+      ],
+      "Next": "Score_Discovery"
+    },
+    "Score_Discovery": {
+      "Type": "Task",
+      "Comment": "Deterministic risk scoring during Discovery: invoke documents.compute_risk_score so the score is a real (traced) workflow tool call rather than left to the LLM. Non-blocking + idempotent (skips if already scored).",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Arguments": {
+        "FunctionName": "${ToolDocumentsFn}",
+        "Payload": {
+          "tool_name": "compute_risk_score",
+          "app_id": "{% $states.input.app_id %}"
+        }
+      },
+      "Output": "{% $states.input %}",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "Validate_Discovery"
+        }
+      ],
+      "Next": "Validate_Discovery"
+    },
+    "Validate_Discovery": {
+      "Type": "Task",
+      "Comment": "Deterministic check that the discovery phase produced its required outputs.",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Arguments": {
+        "FunctionName": "${InvokeRuntimeFn}",
+        "Payload": {
+          "mode": "validate_phase",
+          "phase": "discovery",
+          "app_id": "{% $states.input.app_id %}"
+        }
+      },
+      "Output": "{% $merge([$states.input, {'valid': $states.result.Payload.valid}]) %}",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "MarkFailed"
+        }
+      ],
+      "Next": "Check_Discovery"
+    },
+    "Check_Discovery": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Condition": "{% $states.input.valid = true %}",
+          "Next": "Approval_Discovery"
+        }
+      ],
+      "Default": "MarkFailed"
+    },
+    "Approval_Discovery": {
+      "Type": "Task",
+      "Comment": "Human approval after Discovery. User reviews the recommended 7R strategy and may override it before approving; ResolveStrategy then branches on the saved strategy.",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Arguments": {
+        "FunctionName": "${InvokeRuntimeFn}",
+        "Payload": {
+          "app_id": "{% $states.input.app_id %}",
+          "mode": "store_token",
+          "step": "discovery_review",
+          "token": "{% $states.context.Task.Token %}"
+        }
+      },
+      "Output": {
+        "app_id": "{% $states.input.app_id %}"
+      },
+      "TimeoutSeconds": ${ApprovalTimeoutSeconds},
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "StepRejected"
+          ],
+          "Next": "Discovery",
+          "Output": {
+            "app_id": "{% $states.input.app_id %}"
+          }
+        },
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "MarkFailed"
+        }
+      ],
+      "Next": "ResolveStrategy",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ]
+    },
+    "ResolveStrategy": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Arguments": {
+        "FunctionName": "${InvokeRuntimeFn}",
+        "Payload": {
+          "app_id": "{% $states.input.app_id %}",
+          "mode": "resolve_strategy"
+        }
+      },
+      "Output": {
+        "app_id": "{% $states.input.app_id %}",
+        "migration_strategy": "{% $states.result.Payload.migration_strategy %}",
+        "branch": "{% $states.result.Payload.branch %}",
+        "app_facts": "{% $states.result.Payload.app_facts %}"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "MarkFailed"
+        }
+      ],
+      "Next": "StrategyChoice"
+    },
+    "StrategyChoice": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Condition": "{% $states.input.branch = 'close_out' %}",
+          "Next": "Handover_CloseOut"
+        }
+      ],
+      "Default": "PreHook_Assessment"
+    },
+    "PreHook_Assessment": {
+      "Type": "Task",
+      "Comment": "Deterministic pre-hook: verify Assessment preconditions (confirmed migration_strategy + at least one repo linked for ATX to clone) BEFORE launching ATX. Reads persisted state only.",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Arguments": {
+        "FunctionName": "${InvokeRuntimeFn}",
+        "Payload": {
+          "mode": "prehook_phase",
+          "phase": "assessment",
+          "app_id": "{% $states.input.app_id %}"
+        }
+      },
+      "Output": "{% $merge([$states.input, {'ready': $states.result.Payload.ready, 'prehook_assessment': $states.result.Payload}]) %}",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "MarkFailed"
+        }
+      ],
+      "Next": "PreCheck_Assessment"
+    },
+    "PreCheck_Assessment": {
+      "Type": "Choice",
+      "Comment": "Gate entry to Assessment/ATX on the pre-hook result: proceed when ready, else fail fast with the recorded blockers.",
+      "Choices": [
+        {
+          "Condition": "{% $states.input.ready = true %}",
+          "Next": "LaunchATX"
+        }
+      ],
+      "Default": "MarkFailed"
+    },
+    "LaunchATX": {
+      "Type": "Task",
+      "Comment": "Blocks until ATX code analysis completes on ECS (Option C callback).",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Arguments": {
+        "FunctionName": "${ToolExecutionFn}",
+        "Payload": {
+          "tool_name": "start_code_analysis",
+          "arguments": {
+            "app_id": "{% $states.input.app_id %}",
+            "td_name": "AWS/comprehensive-codebase-analysis"
+          },
+          "task_token": "{% $states.context.Task.Token %}"
+        }
+      },
+      "Output": {
+        "app_id": "{% $states.input.app_id %}",
+        "branch": "{% $states.input.branch %}",
+        "migration_strategy": "{% $states.input.migration_strategy %}",
+        "app_facts": "{% $exists($states.input.app_facts) ? $states.input.app_facts : '' %}",
+        "reviewer_comment": "{% $exists($states.input.reviewer_comment) ? $states.input.reviewer_comment : '' %}"
+      },
+      "TimeoutSeconds": 7200,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "MarkFailed"
+        }
+      ],
+      "Next": "Assessment"
+    },
+    "Assessment": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::bedrockagentcore:invokeHarness",
+      "Arguments": {
+        "HarnessArn": "${HarnessArn}",
+        "RuntimeSessionId": "{% $uuid() %}",
+        "Messages": [
+          {
+            "Content": [
+              {
+                "Text": "{% 'Application: ' & $states.input.app_id & '. Confirmed migration_strategy=' & $states.input.migration_strategy & ' (AUTHORITATIVE: write the entire assessment for this strategy, never for another one).' & ($exists($states.input.app_facts) and $states.input.app_facts ? ' AUTHORITATIVE APP FACTS (from the app record; use these values verbatim, never contradict them, never call one of them missing or unknown, and never invent facts that are not listed - no server counts, vendors, prior strategies, traffic findings or validation phases that are not on record): ' & $states.input.app_facts & '.' : '') & ' ATX code analysis is complete. MUST call: 1) portfolio___get_app_context (the confirmed migration_strategy, target_compute, target_database and cicd_target in it are AUTHORITATIVE; if the call errors, rely on the facts above - never guess). 2) documents___get_analysis_result analysis_type=comprehensive-codebase-analysis to read REAL findings. 3) From the findings, determine the primary language, framework, build_tool and target_compute. 4) Persist the detected stack: call portfolio___update_app_field for each of field=language, field=framework, field=build_tool (only when identified from the analysis; do not guess). 5) documents___store_analysis_result analysis_type=assessment-summary with language, framework, build_tool, target_compute, target_compute_rationale, cicd_target, transformations (recommended + gaps), cost_projection, qualification_criteria, containerization_readiness, recommendations, migration_order. Everything MUST be consistent with the confirmed strategy and selections: for rehost/relocate/retain target_compute=ec2, transformations are empty, the cost ballpark is priced for EC2 with the confirmed target_database (as-is, DynamoDB or RDS MySQL), and no upgrade/containerization steps appear in migration_order or recommendations (modernization ideas go to deferred_modernization, labelled out of scope). Do not invent atx_job_id / atx_run_id / analysis_completed_at: the system stamps them from the real ATX job. 6) portfolio___update_app_field status=assessed.' & ($exists($states.input.assessment_blockers) and $count($states.input.assessment_blockers) > 0 ? ' PREVIOUS ATTEMPT FAILED the deterministic assessment check - regenerate and store the assessment-summary fixing ALL of: ' & $join($states.input.assessment_blockers, ' | ') : '') & ($exists($states.input.reviewer_comment) and $states.input.reviewer_comment ? ' REVIEWER FEEDBACK from the rejected approval gate (address ALL of it in this regeneration): ' & $states.input.reviewer_comment : '') %}"
+              }
+            ],
+            "Role": "user"
+          }
+        ],
+        "TimeoutSeconds": 600
+      },
+      "Output": {
+        "app_id": "{% $states.input.app_id %}",
+        "branch": "{% $states.input.branch %}",
+        "migration_strategy": "{% $states.input.migration_strategy %}",
+        "app_facts": "{% $exists($states.input.app_facts) ? $states.input.app_facts : '' %}",
+        "assessment_attempt": "{% ($exists($states.input.assessment_attempt) ? $states.input.assessment_attempt : 0) + 1 %}",
+        "reviewer_comment": "{% $exists($states.input.reviewer_comment) ? $states.input.reviewer_comment : '' %}"
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "BedrockAgentCore.ThrottlingException"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        },
+        {
+          "Comment": "Transient AgentCore 5xx (e.g. HTTP 502 before the Harness starts): retry instead of failing the run.",
+          "ErrorEquals": [
+            "BedrockAgentCore.BedrockAgentCoreException",
+            "BedrockAgentCore.InternalServerException",
+            "BedrockAgentCore.ServiceUnavailableException"
+          ],
+          "IntervalSeconds": 15,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "MarkFailed"
+        }
+      ],
+      "Next": "Validate_Assessment"
+    },
+    "Validate_Assessment": {
+      "Type": "Task",
+      "Comment": "Deterministic check that THIS run's assessment produced an assessment-summary record (not just any ANALYSIS#) written for the CONFIRMED strategy. Contradictions -> one bounded Assessment re-run with the blockers in the prompt, then MarkFailed.",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Arguments": {
+        "FunctionName": "${InvokeRuntimeFn}",
+        "Payload": {
+          "mode": "validate_phase",
+          "phase": "assessment",
+          "app_id": "{% $states.input.app_id %}",
+          "run_started_at": "{% $states.context.Execution.StartTime %}",
+          "attempt": "{% $states.input.assessment_attempt %}"
+        }
+      },
+      "Output": "{% $merge([$states.input, {'valid': $states.result.Payload.valid, 'assessment_validation': $states.result.Payload, 'assessment_blockers': $states.result.Payload.blockers}]) %}",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "MarkFailed"
+        }
+      ],
+      "Next": "Check_Assessment"
+    },
+    "Check_Assessment": {
+      "Type": "Choice",
+      "Comment": "Proceed to the assessment_review gate when valid; re-run Assessment once when the summary contradicts the confirmed strategy; otherwise fail.",
+      "Choices": [
+        {
+          "Condition": "{% $states.input.valid = true %}",
+          "Next": "Approval_Assessment"
+        },
+        {
+          "Condition": "{% $states.input.assessment_attempt < 2 and $count($states.input.assessment_blockers) > 0 %}",
+          "Next": "Assessment"
+        }
+      ],
+      "Default": "MarkFailed"
+    },
+    "PreHook_Design": {
+      "Type": "Task",
+      "Comment": "Deterministic pre-hook: verify Design preconditions (confirmed strategy + an assessment-summary record from THIS run) BEFORE generating the design. Reads persisted state only.",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Arguments": {
+        "FunctionName": "${InvokeRuntimeFn}",
+        "Payload": {
+          "mode": "prehook_phase",
+          "phase": "design",
+          "app_id": "{% $states.input.app_id %}",
+          "run_started_at": "{% $states.context.Execution.StartTime %}"
+        }
+      },
+      "Output": "{% $merge([$states.input, {'ready': $states.result.Payload.ready, 'prehook_design': $states.result.Payload}]) %}",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "MarkFailed"
+        }
+      ],
+      "Next": "PreCheck_Design"
+    },
+    "PreCheck_Design": {
+      "Type": "Choice",
+      "Comment": "Gate entry to Design on the pre-hook result: proceed when ready, else fail fast with the recorded blockers.",
+      "Choices": [
+        {
+          "Condition": "{% $states.input.ready = true %}",
+          "Next": "Design"
+        }
+      ],
+      "Default": "MarkFailed"
+    },
+    "Approval_Assessment": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Arguments": {
+        "FunctionName": "${InvokeRuntimeFn}",
+        "Payload": {
+          "app_id": "{% $states.input.app_id %}",
+          "mode": "store_token",
+          "step": "assessment_review",
+          "token": "{% $states.context.Task.Token %}"
+        }
+      },
+      "Output": {
+        "app_id": "{% $states.input.app_id %}",
+        "branch": "{% $states.input.branch %}",
+        "migration_strategy": "{% $states.input.migration_strategy %}"
+      },
+      "TimeoutSeconds": ${ApprovalTimeoutSeconds},
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "StepRejected"
+          ],
+          "Next": "Route_AssessmentRetry",
+          "Output": {
+            "app_id": "{% $states.input.app_id %}",
+            "branch": "{% $states.input.branch %}",
+            "migration_strategy": "{% $states.input.migration_strategy %}",
+            "app_facts": "{% $exists($states.input.app_facts) ? $states.input.app_facts : '' %}",
+            "reviewer_comment": "{% $exists($states.errorOutput.Cause) ? ($parse($states.errorOutput.Cause).comment ? $parse($states.errorOutput.Cause).comment : '') : '' %}",
+            "reanalyze": "{% $exists($states.errorOutput.Cause) ? ($parse($states.errorOutput.Cause).reanalyze = true) : false %}"
+          }
+        },
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "MarkFailed"
+        }
+      ],
+      "Next": "PreHook_Design",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ]
+    },
+    "Route_AssessmentRetry": {
+      "Type": "Choice",
+      "Comment": "Rejected assessment: re-run the code analysis (repo scan, detected wiring, CI readiness, ATX) when the reviewer changed its inputs (build_dir, repos) or asked for it; otherwise regenerate the assessment only.",
+      "Choices": [
+        {
+          "Condition": "{% $states.input.reanalyze = true %}",
+          "Next": "PreHook_Assessment"
+        }
+      ],
+      "Default": "Assessment"
+    },
+    "Design": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::bedrockagentcore:invokeHarness",
+      "Arguments": {
+        "HarnessArn": "${HarnessArn}",
+        "RuntimeSessionId": "{% $uuid() %}",
+        "Messages": [
+          {
+            "Content": [
+              {
+                "Text": "{% 'Application: ' & $states.input.app_id & '. Generate the complete Design Document following the design skill. This runs AFTER assessment approval: the APPROVED selections in app META are authoritative and override any assessment prose - migration_strategy, target_compute, target_database, cicd_target, target_account, vpc_cidr, target_region (default us-east-1), and when present rpo, rto, uptime_sla, dr_availability, multi_region. MUST call: 1) portfolio___get_app_context 2) documents___get_analysis_result analysis_type=assessment-summary (treat its consistency_warnings as known errors and its deferred_modernization items as OUT OF SCOPE) 3) documents___store_design_document version=v1. The document MUST contain all 12 design-skill sections as level-2 headings, in this order: 1. Executive Summary; 2. Current State; 3. Target State Architecture (3.1 AWS Account & Region, 3.2 Network Design, 3.3 Compute Strategy, 3.4 Data Store Migration, 3.5 Security & IAM, 3.6 Application Configuration); 4. Migration Approach (incl. 4.5 Findings Remediation); 5. Testing & Validation; 6. Operational Readiness (monitoring, DR/HA, backup & recovery meeting the app rpo/rto/uptime_sla/dr_availability, runbooks); 7. Timeline & Milestones; 8. Risks & Mitigations; 9. Cost Analysis; 10. Code Transformations; 11. CI/CD Pipeline; 12. Deployment Readiness Checklist. Before section 1 add a Target Infrastructure Parameters table (columns Parameter, Value) with rows AWS Account ID = target_account, Target Region, VPC CIDR = vpc_cidr, Target Compute = target_compute, Target Database = target_database, CI/CD Target = cicd_target, Migration Strategy = migration_strategy; Target VPC/Subnets auto-created by IaC, Container Port and Health Check Path from framework defaults, Domain = ALB DNS. Apply the Target Architecture by Strategy rules for the approved strategy and compute: REHOST/RELOCATE + ec2 = EC2 via MGN/AMI, no containers, database same_as_source stays as-is with no DMS or engine change; ecs_fargate = containers on Amazon ECS Fargate behind the ALB (never EC2 instances, EKS or Lambda); lambda = AWS Lambda + HTTP API Gateway, CodeBuild packages the function to the artifact bucket and deploys with update-function-code (never ECS, Fargate or EC2). Replatform/refactor offer only ecs_fargate or lambda (EC2 is lift-and-shift only); CI/CD is AWS CodePipeline only (never GitHub Actions, GitLab or Jenkins); EKS, DocumentDB and RDS SQL Server are not offered; retain/retire/repurchase are close-outs that never reach Design. NEVER substitute a different compute, database or CI/CD tool (not for scale, peak TPS or team skills) - record any concern as a risk in section 8 instead. Compute, database and CI/CD statements (parameters table and section 3.3) MUST name exactly the approved target_compute, target_database and cicd_target. Header Status must be Pending Review (never Approved - approval happens at the design_review gate). Use the single canonical label \"AWS Account ID\" everywhere (never \"Target Account\"). Do NOT emit [REQUIRES INPUT] anywhere: the AWS Account ID and VPC CIDR were confirmed at assessment approval; if any value is genuinely absent use a sensible default, not [REQUIRES INPUT].' & ($exists($states.input.design_blockers) and $count($states.input.design_blockers) > 0 ? ' PREVIOUS ATTEMPT FAILED the deterministic design check - regenerate and store the document fixing ALL of: ' & $join($states.input.design_blockers, ' | ') : '') & ($exists($states.input.reviewer_comment) and $states.input.reviewer_comment ? ' REVIEWER FEEDBACK from the rejected approval gate (address ALL of it in this regeneration): ' & $states.input.reviewer_comment : '') %}"
+              }
+            ],
+            "Role": "user"
+          }
+        ],
+        "TimeoutSeconds": 600
+      },
+      "Output": {
+        "app_id": "{% $states.input.app_id %}",
+        "branch": "{% $states.input.branch %}",
+        "migration_strategy": "{% $states.input.migration_strategy %}",
+        "design_attempt": "{% ($exists($states.input.design_attempt) ? $states.input.design_attempt : 0) + 1 %}",
+        "reviewer_comment": "{% $exists($states.input.reviewer_comment) ? $states.input.reviewer_comment : '' %}"
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "BedrockAgentCore.ThrottlingException"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        },
+        {
+          "Comment": "Transient AgentCore 5xx (e.g. HTTP 502 before the Harness starts): retry instead of failing the run.",
+          "ErrorEquals": [
+            "BedrockAgentCore.BedrockAgentCoreException",
+            "BedrockAgentCore.InternalServerException",
+            "BedrockAgentCore.ServiceUnavailableException"
+          ],
+          "IntervalSeconds": 15,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "MarkFailed"
+        }
+      ],
+      "Next": "Validate_Design"
+    },
+    "Validate_Design": {
+      "Type": "Task",
+      "Comment": "Deterministic post-check: the LATEST stored design version from THIS run must not contradict the approved META selections (strategy, target_compute, target_database, cicd_target, target_account, vpc_cidr). Contradictions -> one bounded Design re-run with the blockers in the prompt, then MarkFailed; softer findings (missing sections, premature Approved status) are surfaced as warnings in the design_review decision_summary.",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Arguments": {
+        "FunctionName": "${InvokeRuntimeFn}",
+        "Payload": {
+          "mode": "validate_phase",
+          "phase": "design",
+          "app_id": "{% $states.input.app_id %}",
+          "attempt": "{% $states.input.design_attempt %}",
+          "run_started_at": "{% $states.context.Execution.StartTime %}"
+        }
+      },
+      "Output": "{% $merge([$states.input, {'valid': $states.result.Payload.valid, 'design_validation': $states.result.Payload, 'design_blockers': $states.result.Payload.blockers}]) %}",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "MarkFailed"
+        }
+      ],
+      "Next": "Check_Design"
+    },
+    "Check_Design": {
+      "Type": "Choice",
+      "Comment": "Proceed to the design_review gate when valid; re-run Design once with the recorded blockers; fail on a second invalid attempt.",
+      "Choices": [
+        {
+          "Condition": "{% $states.input.valid = true %}",
+          "Next": "Approval_Design"
+        },
+        {
+          "Condition": "{% $states.input.design_attempt >= 2 %}",
+          "Next": "MarkFailed"
+        }
+      ],
+      "Default": "Design"
+    },
+    "Approval_Design": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Arguments": {
+        "FunctionName": "${InvokeRuntimeFn}",
+        "Payload": {
+          "app_id": "{% $states.input.app_id %}",
+          "mode": "store_token",
+          "step": "design_review",
+          "token": "{% $states.context.Task.Token %}"
+        }
+      },
+      "Output": {
+        "app_id": "{% $states.input.app_id %}",
+        "branch": "{% $states.input.branch %}",
+        "migration_strategy": "{% $states.input.migration_strategy %}"
+      },
+      "TimeoutSeconds": ${ApprovalTimeoutSeconds},
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "StepRejected"
+          ],
+          "Next": "Design",
+          "Output": {
+            "app_id": "{% $states.input.app_id %}",
+            "branch": "{% $states.input.branch %}",
+            "migration_strategy": "{% $states.input.migration_strategy %}",
+            "reviewer_comment": "{% $exists($states.errorOutput.Cause) ? ($parse($states.errorOutput.Cause).comment ? $parse($states.errorOutput.Cause).comment : '') : '' %}"
+          }
+        },
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "MarkFailed"
+        }
+      ],
+      "Next": "PreHook_Execution",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ]
+    },
+    "PreHook_Execution": {
+      "Type": "Task",
+      "Comment": "Deterministic pre-hook: verify Execution preconditions (confirmed strategy + target_compute + AWS target_account + a linked repo) BEFORE transform/infra/CI-CD run. Reads persisted state only; fails fast instead of emitting [REQUIRES INPUT] downstream.",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Arguments": {
+        "FunctionName": "${InvokeRuntimeFn}",
+        "Payload": {
+          "mode": "prehook_phase",
+          "phase": "execution",
+          "app_id": "{% $states.input.app_id %}"
+        }
+      },
+      "Output": "{% $merge([$states.input, {'ready': $states.result.Payload.ready, 'prehook_execution': $states.result.Payload}]) %}",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "MarkFailed"
+        }
+      ],
+      "Next": "PreCheck_Execution"
+    },
+    "PreCheck_Execution": {
+      "Type": "Choice",
+      "Comment": "Gate entry to Execution on the pre-hook result: proceed when ready, else fail fast with the recorded blockers.",
+      "Choices": [
+        {
+          "Condition": "{% $states.input.ready = true %}",
+          "Next": "TransformChoice"
+        }
+      ],
+      "Default": "MarkFailed"
+    },
+    "TransformChoice": {
+      "Type": "Choice",
+      "Comment": "Rehost/Relocate skip code transformation; Replatform/Refactor run it.",
+      "Choices": [
+        {
+          "Condition": "{% $states.input.branch = 'rehost_relocate' %}",
+          "Next": "DatabaseMigration"
+        }
+      ],
+      "Default": "LaunchTransformation"
+    },
+    "LaunchTransformation": {
+      "Type": "Task",
+      "Comment": "Real ATX code transformation on ECS (commit + push/PR), Option C callback.",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Arguments": {
+        "FunctionName": "${ToolExecutionFn}",
+        "Payload": {
+          "tool_name": "start_code_transformation",
+          "arguments": {
+            "app_id": "{% $states.input.app_id %}"
+          },
+          "task_token": "{% $states.context.Task.Token %}"
+        }
+      },
+      "Output": {
+        "app_id": "{% $states.input.app_id %}",
+        "branch": "{% $states.input.branch %}",
+        "migration_strategy": "{% $states.input.migration_strategy %}"
+      },
+      "TimeoutSeconds": 14400,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "MarkFailed"
+        }
+      ],
+      "Next": "DatabaseMigration"
+    },
+    "DatabaseMigration": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::bedrockagentcore:invokeHarness",
+      "Arguments": {
+        "HarnessArn": "${HarnessArn}",
+        "RuntimeSessionId": "{% $uuid() %}",
+        "Messages": [
+          {
+            "Content": [
+              {
+                "Text": "{% 'Application: ' & $states.input.app_id & '. Execution sub-step: DATABASE MIGRATION. MUST call: 1) portfolio___get_app_context 2) documents___store_analysis_result analysis_type=execution-database with target service, migration method (DMS/schema-conversion/dump-restore), and per-step plan, OR record not_required if no database. 3) portfolio___update_app_field field=exec_database_status value=done.' %}"
+              }
+            ],
+            "Role": "user"
+          }
+        ],
+        "TimeoutSeconds": 600
+      },
+      "Output": {
+        "app_id": "{% $states.input.app_id %}",
+        "branch": "{% $states.input.branch %}",
+        "migration_strategy": "{% $states.input.migration_strategy %}"
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "BedrockAgentCore.ThrottlingException"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        },
+        {
+          "Comment": "Transient AgentCore 5xx (e.g. HTTP 502 before the Harness starts): retry instead of failing the run.",
+          "ErrorEquals": [
+            "BedrockAgentCore.BedrockAgentCoreException",
+            "BedrockAgentCore.InternalServerException",
+            "BedrockAgentCore.ServiceUnavailableException"
+          ],
+          "IntervalSeconds": 15,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "MarkFailed"
+        }
+      ],
+      "Next": "InfrastructureProvisioning"
+    },
+    "InfrastructureProvisioning": {
+      "Type": "Task",
+      "Comment": "Deterministic execution sub-step: invoke the tool Lambda directly (generate + commit to repo). No LLM harness.",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Arguments": {
+        "FunctionName": "${ToolExecutionFn}",
+        "Payload": {
+          "tool_name": "provision_infrastructure",
+          "arguments": {
+            "app_id": "{% $states.input.app_id %}"
+          }
+        }
+      },
+      "Output": {
+        "app_id": "{% $states.input.app_id %}",
+        "branch": "{% $states.input.branch %}",
+        "migration_strategy": "{% $states.input.migration_strategy %}",
+        "step_status": "{% $exists($states.result.Payload.status) ? $states.result.Payload.status : 'ok' %}",
+        "step_error": "{% $exists($states.result.Payload.message) ? $states.result.Payload.message : ($exists($states.result.Payload.error) ? $states.result.Payload.error : '') %}"
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "MarkFailed"
+        }
+      ],
+      "Next": "Check_InfrastructureProvisioning"
+    },
+    "Check_InfrastructureProvisioning": {
+      "Type": "Choice",
+      "Comment": "Fail on a infrastructure provisioning tool error instead of carrying it into the next step (APP-CLI: missing Terraform templates surfaced only as TerraformStageMissing one step later).",
+      "Choices": [
+        {
+          "Condition": "{% $states.input.step_status = 'error' %}",
+          "Next": "Failed_InfrastructureProvisioning"
+        }
+      ],
+      "Default": "InfrastructureValidate"
+    },
+    "Failed_InfrastructureProvisioning": {
+      "Type": "Fail",
+      "Error": "InfrastructureProvisioningFailed",
+      "Cause": "{% $states.input.step_error ? $states.input.step_error : 'tool returned status=error' %}"
+    },
+    "InfrastructureValidate": {
+      "Type": "Task",
+      "Comment": "Runs terraform validate + plan on the generated IaC via the ECS worker (MODE=infra); captures output to execution/infrastructure/ in S3. Plan uses the worker's own account creds; nothing is applied.",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Arguments": {
+        "FunctionName": "${ToolExecutionFn}",
+        "Payload": {
+          "tool_name": "run_terraform_plan",
+          "arguments": {
+            "app_id": "{% $states.input.app_id %}"
+          },
+          "task_token": "{% $states.context.Task.Token %}"
+        }
+      },
+      "Output": {
+        "app_id": "{% $states.input.app_id %}",
+        "branch": "{% $states.input.branch %}",
+        "migration_strategy": "{% $states.input.migration_strategy %}",
+        "infra_status": "{% $exists($states.result.status) ? $states.result.status : 'unknown' %}",
+        "infra_findings": "{% $exists($states.result.exposure_findings) ? $states.result.exposure_findings : [] %}"
+      },
+      "TimeoutSeconds": 1800,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "MarkFailed"
+        }
+      ],
+      "Next": "Check_InfrastructureValidate"
+    },
+    "Check_InfrastructureValidate": {
+      "Type": "Choice",
+      "Comment": "Gate every app's generated IaC on the deterministic infra checks: terraform validate + plan must pass and the exposure policy (no internet-facing LB, no 0.0.0.0/0 ingress, no public IPs/DBs/buckets/unauthenticated endpoints unless META expose_publicly) must be clean. Findings are in execution/infrastructure/{validate,plan}.txt + exposure.json.",
+      "Choices": [
+        {
+          "Condition": "{% $states.input.infra_status = 'validated' %}",
+          "Next": "FixCIGaps"
+        }
+      ],
+      "Default": "Failed_InfrastructureValidate"
+    },
+    "Failed_InfrastructureValidate": {
+      "Type": "Fail",
+      "Error": "InfrastructureValidateFailed",
+      "Cause": "{% 'Generated infrastructure failed validation: status=' & $states.input.infra_status & ($count($states.input.infra_findings) > 0 ? ' \u2014 exposure: ' & $join($states.input.infra_findings, ' | ') : '') & ' (see execution/infrastructure/validate.txt, plan.txt, exposure.json)' %}"
+    },
+    "FixCIGaps": {
+      "Type": "Task",
+      "Comment": "Advisory CI-readiness fixer: ECS worker MODE=ci-fix commits build/test-file fixes to the migration branch (dependency manifest, pytest config, runtime-only Dockerfile, safe lint fixes, scaffolded smoke tests) and re-checks. Never blocks: a fixer error rides on the execution gate.",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Arguments": {
+        "FunctionName": "${ToolExecutionFn}",
+        "Payload": {
+          "tool_name": "run_ci_fix",
+          "arguments": {
+            "app_id": "{% $states.input.app_id %}"
+          },
+          "task_token": "{% $states.context.Task.Token %}"
+        }
+      },
+      "Output": {
+        "app_id": "{% $states.input.app_id %}",
+        "branch": "{% $states.input.branch %}",
+        "migration_strategy": "{% $states.input.migration_strategy %}",
+        "ci_fix_status": "{% $exists($states.result.status) ? $states.result.status : 'unknown' %}"
+      },
+      "TimeoutSeconds": 1800,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Output": {
+            "app_id": "{% $states.input.app_id %}",
+            "branch": "{% $states.input.branch %}",
+            "migration_strategy": "{% $states.input.migration_strategy %}",
+            "ci_fix_status": "error"
+          },
+          "Next": "CICDSetup"
+        }
+      ],
+      "Next": "CICDSetup"
+    },
+    "CICDSetup": {
+      "Type": "Task",
+      "Comment": "Deterministic execution sub-step: invoke the tool Lambda directly (generate + commit to repo). No LLM harness.",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Arguments": {
+        "FunctionName": "${ToolExecutionFn}",
+        "Payload": {
+          "tool_name": "generate_cicd",
+          "arguments": {
+            "app_id": "{% $states.input.app_id %}"
+          }
+        }
+      },
+      "Output": {
+        "app_id": "{% $states.input.app_id %}",
+        "branch": "{% $states.input.branch %}",
+        "migration_strategy": "{% $states.input.migration_strategy %}",
+        "step_status": "{% $exists($states.result.Payload.status) ? $states.result.Payload.status : 'ok' %}",
+        "step_error": "{% $exists($states.result.Payload.message) ? $states.result.Payload.message : ($exists($states.result.Payload.error) ? $states.result.Payload.error : '') %}"
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "MarkFailed"
+        }
+      ],
+      "Next": "Check_CICDSetup"
+    },
+    "Check_CICDSetup": {
+      "Type": "Choice",
+      "Comment": "Fail on a CI/CD generation tool error instead of carrying it into the next step (APP-CLI: missing Terraform templates surfaced only as TerraformStageMissing one step later).",
+      "Choices": [
+        {
+          "Condition": "{% $states.input.step_status = 'error' %}",
+          "Next": "Failed_CICDSetup"
+        }
+      ],
+      "Default": "Approval_Execution"
+    },
+    "Failed_CICDSetup": {
+      "Type": "Fail",
+      "Error": "CICDSetupFailed",
+      "Cause": "{% $states.input.step_error ? $states.input.step_error : 'tool returned status=error' %}"
+    },
+    "Approval_Execution": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Arguments": {
+        "FunctionName": "${InvokeRuntimeFn}",
+        "Payload": {
+          "app_id": "{% $states.input.app_id %}",
+          "mode": "store_token",
+          "step": "execution_review",
+          "token": "{% $states.context.Task.Token %}"
+        }
+      },
+      "Output": {
+        "app_id": "{% $states.input.app_id %}",
+        "branch": "{% $states.input.branch %}",
+        "migration_strategy": "{% $states.input.migration_strategy %}",
+        "deploy_attempt": "{% $exists($states.input.deploy_attempt) ? $states.input.deploy_attempt : 0 %}"
+      },
+      "TimeoutSeconds": ${ApprovalTimeoutSeconds},
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "StepRejected"
+          ],
+          "Output": {
+            "app_id": "{% $states.input.app_id %}",
+            "branch": "{% $states.input.branch %}",
+            "migration_strategy": "{% $states.input.migration_strategy %}"
+          },
+          "Next": "InfrastructureProvisioning"
+        },
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "MarkFailed"
+        }
+      ],
+      "Next": "Deploy",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Comment": "Deploy gate: the human reviews the migration branch (IaC + CI fix + pipeline) and approves the exact HEAD commit (POST /workflow/approve inputs.deploy_commit) \u2014 approval = Deploy. Reject regenerates Execution from the (possibly edited) branch."
+    },
+    "Deploy": {
+      "Type": "Task",
+      "Comment": "terraform apply of the IaC committed on the migration branch at the approved commit (worker MODE=infra, INFRA_ACTION=apply, dedicated deploy role, exposure policy re-checked on the plan; a moved branch is refused), then wait for the app's first CodePipeline run on that commit.",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Arguments": {
+        "FunctionName": "${ToolExecutionFn}",
+        "Payload": {
+          "tool_name": "deploy_infrastructure",
+          "arguments": {
+            "app_id": "{% $states.input.app_id %}"
+          },
+          "task_token": "{% $states.context.Task.Token %}"
+        }
+      },
+      "Output": {
+        "app_id": "{% $states.input.app_id %}",
+        "branch": "{% $states.input.branch %}",
+        "migration_strategy": "{% $states.input.migration_strategy %}",
+        "deploy_attempt": "{% $states.input.deploy_attempt + 1 %}",
+        "deploy_status": "{% $exists($states.result.status) ? $states.result.status : 'unknown' %}",
+        "deploy_error": "{% $exists($states.result.message) ? $states.result.message : '' %}"
+      },
+      "TimeoutSeconds": 7200,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Output": {
+            "app_id": "{% $states.input.app_id %}",
+            "branch": "{% $states.input.branch %}",
+            "migration_strategy": "{% $states.input.migration_strategy %}",
+            "deploy_attempt": "{% $states.input.deploy_attempt + 1 %}",
+            "deploy_status": "error",
+            "deploy_error": "{% $states.errorOutput.Cause ? $states.errorOutput.Cause : $states.errorOutput.Error %}"
+          },
+          "Next": "Check_Deploy"
+        }
+      ],
+      "Next": "Check_Deploy"
+    },
+    "Check_Deploy": {
+      "Type": "Choice",
+      "Comment": "Deployed \u2192 Validation runs against the live stack; skipped (enable_deploy = false) \u2192 Validation runs its static checks only. Otherwise back to the deploy gate (the decision summary shows the apply/pipeline error) so the human can fix the branch and redeploy \u2014 at most 3 attempts.",
+      "Choices": [
+        {
+          "Condition": "{% $states.input.deploy_status = 'deployed' or $states.input.deploy_status = 'skipped' %}",
+          "Next": "Validation"
+        },
+        {
+          "Condition": "{% $states.input.deploy_attempt < 3 %}",
+          "Next": "Approval_Execution"
+        }
+      ],
+      "Default": "Failed_Deploy"
+    },
+    "Failed_Deploy": {
+      "Type": "Fail",
+      "Error": "DeployFailed",
+      "Cause": "{% $states.input.deploy_error ? $states.input.deploy_error : 'deploy did not reach deployed after 3 attempts' %}"
+    },
+    "Validation": {
+      "Type": "Task",
+      "Comment": "Deterministic Validation (replaces a Harness prompt that reported tests it never ran): tool_execution.validate_deployment checks Execution's outputs (terraform validate/plan + exposure policy, CI/CD security and coverage gates, transformation outcome) and, once deployed, the live stack (pipeline run, ECS steady + cpu architecture, no public IPs, internal ALB, no 0.0.0.0/0 ingress, healthy targets). Same rules for every application.",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Arguments": {
+        "FunctionName": "${ToolExecutionFn}",
+        "Payload": {
+          "tool_name": "validate_deployment",
+          "arguments": {
+            "app_id": "{% $states.input.app_id %}"
+          }
+        }
+      },
+      "Output": {
+        "app_id": "{% $states.input.app_id %}",
+        "branch": "{% $states.input.branch %}",
+        "migration_strategy": "{% $states.input.migration_strategy %}",
+        "validation_verdict": "{% $exists($states.result.Payload.verdict) ? $states.result.Payload.verdict : 'fail' %}",
+        "validation_failed": "{% $exists($states.result.Payload.failed_detail) ? $states.result.Payload.failed_detail : [] %}",
+        "deploy_attempt": "{% $exists($states.input.deploy_attempt) ? $states.input.deploy_attempt : 0 %}"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "MarkFailed"
+        }
+      ],
+      "Next": "Check_Validation",
+      "TimeoutSeconds": 960
+    },
+    "Check_Validation": {
+      "Type": "Choice",
+      "Comment": "A failed Validation of a deployed app returns to the execution gate (fix on the migration branch, Retry/redeploy; shares the 3-attempt deploy budget) instead of ending the run \u2014 APP-CLI 2026-10-26.",
+      "Choices": [
+        {
+          "Condition": "{% $states.input.validation_verdict = 'pass' or $states.input.validation_verdict = 'pass_with_warnings' %}",
+          "Next": "Approval_Validation"
+        },
+        {
+          "Condition": "{% $exists($states.input.deploy_attempt) and $states.input.deploy_attempt < 3 %}",
+          "Next": "Approval_Execution"
+        }
+      ],
+      "Default": "Failed_Validation"
+    },
+    "Failed_Validation": {
+      "Type": "Fail",
+      "Error": "ValidationFailed",
+      "Cause": "{% 'Validation failed: ' & $join($states.input.validation_failed, ' | ') %}"
+    },
+    "Approval_Validation": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Arguments": {
+        "FunctionName": "${InvokeRuntimeFn}",
+        "Payload": {
+          "app_id": "{% $states.input.app_id %}",
+          "mode": "store_token",
+          "step": "validation_review",
+          "token": "{% $states.context.Task.Token %}"
+        }
+      },
+      "Output": {
+        "app_id": "{% $states.input.app_id %}",
+        "branch": "{% $states.input.branch %}",
+        "migration_strategy": "{% $states.input.migration_strategy %}"
+      },
+      "TimeoutSeconds": ${ApprovalTimeoutSeconds},
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "StepRejected"
+          ],
+          "Next": "MarkFailed"
+        },
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "MarkFailed"
+        }
+      ],
+      "Next": "Cutover",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ]
+    },
+    "Cutover": {
+      "Type": "Task",
+      "Comment": "Production go-live plan. Gated by Approval_Cutover before any traffic shift.",
+      "Resource": "arn:aws:states:::bedrockagentcore:invokeHarness",
+      "Arguments": {
+        "HarnessArn": "${HarnessArn}",
+        "RuntimeSessionId": "{% $uuid() %}",
+        "Messages": [
+          {
+            "Content": [
+              {
+                "Text": "{% 'Application: ' & $states.input.app_id & '. Prepare CUTOVER. MUST call: 1) portfolio___get_app_context 2) documents___store_analysis_result analysis_type=cutover-plan with the traffic-shift/DNS strategy (blue-green or canary), health-check criteria, and rollback plan. 3) portfolio___update_app_field status=cutover_ready.' %}"
+              }
+            ],
+            "Role": "user"
+          }
+        ],
+        "TimeoutSeconds": 600
+      },
+      "Output": {
+        "app_id": "{% $states.input.app_id %}",
+        "branch": "{% $states.input.branch %}",
+        "migration_strategy": "{% $states.input.migration_strategy %}"
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "BedrockAgentCore.ThrottlingException"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        },
+        {
+          "Comment": "Transient AgentCore 5xx (e.g. HTTP 502 before the Harness starts): retry instead of failing the run.",
+          "ErrorEquals": [
+            "BedrockAgentCore.BedrockAgentCoreException",
+            "BedrockAgentCore.InternalServerException",
+            "BedrockAgentCore.ServiceUnavailableException"
+          ],
+          "IntervalSeconds": 15,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "MarkFailed"
+        }
+      ],
+      "Next": "Approval_Cutover"
+    },
+    "Approval_Cutover": {
+      "Type": "Task",
+      "Comment": "Human go/no-go before production traffic shift (Requirement 25.1).",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Arguments": {
+        "FunctionName": "${InvokeRuntimeFn}",
+        "Payload": {
+          "app_id": "{% $states.input.app_id %}",
+          "mode": "store_token",
+          "step": "cutover_review",
+          "token": "{% $states.context.Task.Token %}"
+        }
+      },
+      "Output": {
+        "app_id": "{% $states.input.app_id %}",
+        "branch": "{% $states.input.branch %}",
+        "migration_strategy": "{% $states.input.migration_strategy %}"
+      },
+      "TimeoutSeconds": ${ApprovalTimeoutSeconds},
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "StepRejected"
+          ],
+          "Next": "MarkFailed"
+        },
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "MarkFailed"
+        }
+      ],
+      "Next": "Handover",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ]
+    },
+    "Handover": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::bedrockagentcore:invokeHarness",
+      "Arguments": {
+        "HarnessArn": "${HarnessArn}",
+        "RuntimeSessionId": "{% $uuid() %}",
+        "Messages": [
+          {
+            "Content": [
+              {
+                "Text": "{% 'Application: ' & $states.input.app_id & '. Generate handover. MUST call: 1) portfolio___get_app_context 2) documents___store_design_document version=final content=Operational Runbook + Architecture Reference + Decommission Plan + Post-Migration Optimization. 3) portfolio___update_app_field status=completed.' %}"
+              }
+            ],
+            "Role": "user"
+          }
+        ],
+        "TimeoutSeconds": 600
+      },
+      "Output": {
+        "app_id": "{% $states.input.app_id %}"
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "BedrockAgentCore.ThrottlingException"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        },
+        {
+          "Comment": "Transient AgentCore 5xx (e.g. HTTP 502 before the Harness starts): retry instead of failing the run.",
+          "ErrorEquals": [
+            "BedrockAgentCore.BedrockAgentCoreException",
+            "BedrockAgentCore.InternalServerException",
+            "BedrockAgentCore.ServiceUnavailableException"
+          ],
+          "IntervalSeconds": 15,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "MarkFailed"
+        }
+      ],
+      "Next": "MarkCompleted"
+    },
+    "Handover_CloseOut": {
+      "Type": "Task",
+      "Comment": "Retire/Retain/Repurchase: skip execution/validation/cutover; produce the close-out document from the app's recorded facts. Deterministically checked (Validate_CloseOut) and human-approved (Approval_CloseOut) before the journey completes.",
+      "Resource": "arn:aws:states:::bedrockagentcore:invokeHarness",
+      "Arguments": {
+        "HarnessArn": "${HarnessArn}",
+        "RuntimeSessionId": "{% $uuid() %}",
+        "Messages": [
+          {
+            "Content": [
+              {
+                "Text": "{% 'Application: ' & $states.input.app_id & ' (confirmed strategy ' & $states.input.migration_strategy & '). Close-out path - the application is NOT migrated to AWS by this journey.' & ($exists($states.input.app_facts) and $states.input.app_facts ? ' AUTHORITATIVE APP FACTS (from the app record; use these values verbatim, never contradict them, never call one of them missing or unknown, and never invent facts that are not listed - no server counts, vendors, prior strategies, traffic findings or validation phases that are not on record): ' & $states.input.app_facts & '.' : '') & ' Today is ' & $substring($now(), 0, 10) & '. MUST call: 1) portfolio___get_app_context (if it errors, rely on the facts above - never guess). 2) documents___store_design_document version=final with a close-out document whose level-2 sections are: Executive Summary; Current State; Decision Rationale; ' & ($states.input.migration_strategy = 'retire' ? 'Decommission Plan' : ($states.input.migration_strategy = 'repurchase' ? 'SaaS Replacement Plan' : 'Retain Plan')) & '; Timeline & Milestones; Risks & Mitigations; Cost Analysis. State the confirmed strategy, the exact machine count, owners, RPO/RTO, risk score and the hard_deadline from the facts. Every scheduled date must be after today, any cutover/decommission must fall on or before the hard_deadline, and work must avoid the change_freeze_windows. Do not schedule work as if the app migrates to AWS.' & ($exists($states.input.closeout_blockers) and $count($states.input.closeout_blockers) > 0 ? ' PREVIOUS ATTEMPT FAILED the deterministic close-out check - regenerate and store the document fixing ALL of: ' & $join($states.input.closeout_blockers, ' | ') : '') & ($exists($states.input.reviewer_comment) and $states.input.reviewer_comment ? ' REVIEWER FEEDBACK from the rejected approval gate (address ALL of it in this regeneration): ' & $states.input.reviewer_comment : '') %}"
+              }
+            ],
+            "Role": "user"
+          }
+        ],
+        "TimeoutSeconds": 600
+      },
+      "Output": {
+        "app_id": "{% $states.input.app_id %}",
+        "branch": "{% $states.input.branch %}",
+        "migration_strategy": "{% $states.input.migration_strategy %}",
+        "app_facts": "{% $exists($states.input.app_facts) ? $states.input.app_facts : '' %}",
+        "closeout_attempt": "{% ($exists($states.input.closeout_attempt) ? $states.input.closeout_attempt : 0) + 1 %}",
+        "reviewer_comment": "{% $exists($states.input.reviewer_comment) ? $states.input.reviewer_comment : '' %}"
+      },
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "BedrockAgentCore.ThrottlingException"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        },
+        {
+          "Comment": "Transient AgentCore 5xx (e.g. HTTP 502 before the Harness starts): retry instead of failing the run.",
+          "ErrorEquals": [
+            "BedrockAgentCore.BedrockAgentCoreException",
+            "BedrockAgentCore.InternalServerException",
+            "BedrockAgentCore.ServiceUnavailableException"
+          ],
+          "IntervalSeconds": 15,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "MarkFailed"
+        }
+      ],
+      "Next": "Validate_CloseOut"
+    },
+    "Validate_CloseOut": {
+      "Type": "Task",
+      "Comment": "Deterministic post-check: the close-out document (DESIGN#final) from THIS run must not contradict the app's recorded facts (strategy, machine count, owners, RPO/RTO, dependencies, cost, risk score, hard deadline, past-dated milestones). Contradictions -> one bounded re-run with the blockers in the prompt; still unresolved -> the human gate shows them.",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Arguments": {
+        "FunctionName": "${InvokeRuntimeFn}",
+        "Payload": {
+          "mode": "validate_phase",
+          "phase": "closeout",
+          "app_id": "{% $states.input.app_id %}",
+          "attempt": "{% $states.input.closeout_attempt %}",
+          "run_started_at": "{% $states.context.Execution.StartTime %}"
+        }
+      },
+      "Output": "{% $merge([$states.input, {'valid': $states.result.Payload.valid, 'closeout_validation': $states.result.Payload, 'closeout_blockers': $states.result.Payload.blockers}]) %}",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "MarkFailed"
+        }
+      ],
+      "Next": "Check_CloseOut"
+    },
+    "Check_CloseOut": {
+      "Type": "Choice",
+      "Comment": "Valid -> close-out gate; contradictions -> re-run the close-out once with the blockers; a second invalid attempt goes to the gate with the contradictions in its decision_summary (a missing document fails).",
+      "Choices": [
+        {
+          "Condition": "{% $states.input.valid = true %}",
+          "Next": "Approval_CloseOut"
+        },
+        {
+          "Condition": "{% $states.input.closeout_attempt < 2 %}",
+          "Next": "Handover_CloseOut"
+        },
+        {
+          "Condition": "{% $count($states.input.closeout_blockers) > 0 %}",
+          "Next": "Approval_CloseOut"
+        }
+      ],
+      "Default": "MarkFailed"
+    },
+    "Approval_CloseOut": {
+      "Type": "Task",
+      "Comment": "Human approval of the close-out document (retire/retain/repurchase) before the journey is marked complete. Reject regenerates it.",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Arguments": {
+        "FunctionName": "${InvokeRuntimeFn}",
+        "Payload": {
+          "app_id": "{% $states.input.app_id %}",
+          "mode": "store_token",
+          "step": "handover_review",
+          "token": "{% $states.context.Task.Token %}"
+        }
+      },
+      "Output": {
+        "app_id": "{% $states.input.app_id %}"
+      },
+      "TimeoutSeconds": ${ApprovalTimeoutSeconds},
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "StepRejected"
+          ],
+          "Next": "Handover_CloseOut",
+          "Output": {
+            "app_id": "{% $states.input.app_id %}",
+            "branch": "{% $states.input.branch %}",
+            "migration_strategy": "{% $states.input.migration_strategy %}",
+            "app_facts": "{% $exists($states.input.app_facts) ? $states.input.app_facts : '' %}",
+            "reviewer_comment": "{% $exists($states.errorOutput.Cause) ? ($parse($states.errorOutput.Cause).comment ? $parse($states.errorOutput.Cause).comment : '') : '' %}"
+          }
+        },
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "MarkFailed"
+        }
+      ],
+      "Next": "MarkCompleted",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ]
+    },
+    "MarkFailed": {
+      "Type": "Fail",
+      "Error": "WorkflowFailed",
+      "Cause": "A phase failed or an approval was rejected."
+    },
+    "MarkCompleted": {
+      "Type": "Task",
+      "Comment": "Deterministically finalize the journey (status=completed) regardless of harness tool calls.",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Arguments": {
+        "FunctionName": "${InvokeRuntimeFn}",
+        "Payload": {
+          "app_id": "{% $states.input.app_id %}",
+          "mode": "mark_completed"
+        }
+      },
+      "Output": {
+        "app_id": "{% $states.input.app_id %}"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "Complete"
+        }
+      ],
+      "Next": "Complete"
+    },
+    "Complete": {
+      "Type": "Succeed"
+    }
+  }
+}

@@ -1,0 +1,24 @@
+# CodePipeline — ECS deploy note for {{app_name}}
+# ------------------------------------------------------------
+# The CodePipeline deploy stage is **not** YAML.
+# It is provisioned by the Terraform `codepipeline` module under
+# `infra/modules/codepipeline/` and executes automatically after the
+# Build stage finishes.
+#
+# Deploy mechanics:
+#   • Pipeline source      : CodeCommit, the repo's default branch {{branch}}
+#                            (pinned in `infra/terraform.tfvars`) — i.e. deploys
+#                            after the migration branch is merged.
+#   • Build stage          : CodeBuild — runs the committed `cicd/buildspec.yml`
+#                            (sibling of this file; module var `buildspec`).
+#   • Build artifact       : `imagedefinitions.json` produced by `post_build`.
+#   • Deploy stage         : ECS deploy action — reads `imagedefinitions.json`
+#                            and updates the ECS service to the new image tag.
+#
+# Target ECS resources (set by the Terraform module):
+#   cluster  = {{ecs_cluster}}
+#   service  = {{ecs_service}}
+#   container_name = {{container_name}}
+#
+# To change deploy behavior, edit `infra/modules/codepipeline/main.tf`
+# (e.g. switch the Deploy action to CodeDeploy blue/green with an appspec.yml).
