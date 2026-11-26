@@ -1,0 +1,17 @@
+# CodePipeline — Lambda deploy note for {{app_name}}
+# ------------------------------------------------------------
+# The pipeline (Terraform `codepipeline` module, deploy_target = "lambda") has
+# Source + Build stages only: the committed `cicd/buildspec.yml` deploys the
+# function itself once tests, the coverage gate and the scans pass.
+#
+# Deploy mechanics:
+#   • Pipeline source  : CodeCommit, the repo's default branch {{branch}}.
+#   • Build stage      : CodeBuild packages the function, uploads it to
+#                        s3://{{artifact_bucket}}/{{app_name}}/<commit>/function.zip,
+#                        runs `aws lambda update-function-code --publish` on
+#                        {{function_name}}, then smoke-invokes {{health_check_path}}
+#                        (HTTP API payload v2) and fails the build unless it
+#                        returns statusCode 200.
+#
+# The function, its HTTP API (SigV4/JWT-protected) and the artifact bucket come
+# from the Terraform `lambda` module.

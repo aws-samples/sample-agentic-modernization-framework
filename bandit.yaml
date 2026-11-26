@@ -1,0 +1,5 @@
+# Bandit configuration (read by ASH: ash_config.yaml scanners.bandit.options.config_file).
+# pytest uses bare `assert`; B101 is meaningless in test modules and is skipped there only.
+# Product code keeps B101 (asserts are stripped under python -O).
+assert_used:
+  skips: ["*/test_*.py", "*/tests/*"]

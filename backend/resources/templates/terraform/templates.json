@@ -1,0 +1,127 @@
+{
+  "modules": [
+    {
+      "id": "vpc",
+      "name": "VPC (multi-AZ)",
+      "description": "Standard VPC with public, private-app, and private-db subnets across az_count AZs (default 2; from META dr_availability.availability_zones / az_count)",
+      "always_include": true,
+      "applicable_compute": [
+        "ecs_fargate",
+        "lambda",
+        "ec2"
+      ]
+    },
+    {
+      "id": "ecs-fargate",
+      "name": "ECS Fargate",
+      "description": "ECS cluster + Fargate service + ALB + ECR + CloudWatch logs",
+      "always_include": false,
+      "applicable_compute": [
+        "ecs_fargate"
+      ]
+    },
+    {
+      "id": "lambda",
+      "name": "Lambda + API Gateway",
+      "description": "Lambda function + HTTP API Gateway (IAM/JWT auth, never anonymous) + CloudWatch logs + artifact S3 bucket ({app_id lowercased}-artifacts-{account}-{region}); CI uploads the function package there and deploys it with update-function-code --publish (Terraform ignores code drift)",
+      "always_include": false,
+      "applicable_compute": [
+        "lambda"
+      ]
+    },
+    {
+      "id": "ec2",
+      "name": "EC2 (ASG + ALB, AMI-based)",
+      "description": "Launch template from a parameterized AMI (AWS MGN-launched / golden AMI; no containers) + Auto Scaling group in private subnets + ALB/target group with health check + security groups + IAM instance profile (SSM, CloudWatch agent, artifact-bucket read) + artifact S3 bucket + CloudWatch log group and CPU/unhealthy-host/5xx alarms",
+      "always_include": false,
+      "applicable_compute": [
+        "ec2"
+      ],
+      "applicable_strategy": [
+        "rehost",
+        "relocate",
+        "replatform",
+        "refactor"
+      ]
+    },
+    {
+      "id": "rds",
+      "name": "RDS / Aurora",
+      "description": "RDS instance (postgres/mysql) or Aurora cluster (aurora-postgresql/aurora-mysql) from target_database; instance class + multi_az vars; KMS-encrypted storage; master credentials managed in Secrets Manager (manage_master_user_password); private DB subnets; SG limited to the app tier",
+      "always_include": false,
+      "applicable_compute": [
+        "ecs_fargate",
+        "lambda",
+        "ec2"
+      ],
+      "applicable_database": [
+        "rds_postgresql",
+        "rds_mysql",
+        "aurora_postgresql",
+        "aurora_mysql"
+      ]
+    },
+    {
+      "id": "dynamodb",
+      "name": "DynamoDB Table",
+      "description": "DynamoDB table with optional GSI, encryption, PITR, TTL",
+      "always_include": false,
+      "applicable_compute": [
+        "lambda",
+        "ecs_fargate",
+        "ec2"
+      ],
+      "applicable_database": [
+        "dynamodb"
+      ]
+    },
+    {
+      "id": "s3",
+      "name": "S3 Bucket",
+      "description": "S3 bucket with versioning, encryption, lifecycle, public access blocked",
+      "always_include": false,
+      "applicable_compute": [
+        "ecs_fargate",
+        "lambda",
+        "ec2"
+      ]
+    },
+    {
+      "id": "codepipeline",
+      "name": "CodePipeline (CodeCommit → CodeBuild → ECS | CodeDeploy | Lambda)",
+      "description": "AWS CodePipeline with CodeCommit source (repo default branch) and CodeBuild running the committed cicd/buildspec.yml (tests + coverage gate); deploy by target_compute: ecs_fargate → ECS deploy action, ec2 → CodeDeploy in-place one-at-a-time behind the ALB, lambda → CodeBuild update-function-code --publish; EventBridge-triggered on push",
+      "always_include": false,
+      "applicable_cicd": [
+        "codepipeline"
+      ],
+      "applicable_compute": [
+        "ecs_fargate",
+        "ec2",
+        "lambda"
+      ]
+    }
+  ],
+  "naming_convention": {
+    "pattern": "{app_id}-{resource}",
+    "examples": {
+      "vpc": "{app_id}-vpc",
+      "ecs_cluster": "{app_id}-cluster",
+      "ecs_service": "{app_id}-service",
+      "alb": "{app_id}-alb",
+      "ecr": "{app_id} (lowercase)",
+      "lambda": "{app_id}-function",
+      "api_gateway": "{app_id}-api",
+      "dynamodb": "{app_id}-table",
+      "s3": "{app_id}-{purpose}-{account}-{region}",
+      "log_group": "/ecs/{app_id} or /aws/lambda/{app_id}-function",
+      "iam_role": "{app_id}-{service}-role",
+      "security_group": "{app_id}-{tier}-sg",
+      "tfstate_backend": "{project_prefix}-tfstate-{account}-{region} (target account; lock table {project_prefix}-tfstate-lock)",
+      "tfstate_key": "{app_id}/terraform.tfstate",
+      "asg": "{app_id}-asg",
+      "launch_template": "{app_id}-lt",
+      "artifact_bucket": "{app_id lowercased}-artifacts-{account}-{region}",
+      "db": "{app_id lowercased}-db"
+    }
+  }
+}

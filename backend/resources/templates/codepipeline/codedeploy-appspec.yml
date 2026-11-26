@@ -1,0 +1,24 @@
+# CodeDeploy AppSpec for {{app_name}} (EC2/on-premises compute platform).
+# Committed to cicd/codedeploy/appspec.yml; the buildspec copies it to the root
+# of the revision. The ASG instances (AMI from AWS MGN / golden image) already
+# run the app as the systemd unit {{service_name}}; a deploy swaps the release
+# under {{install_dir}} and restarts it, one instance at a time behind the ALB.
+version: 0.0
+os: linux
+files:
+  - source: app/
+    destination: {{install_dir}}
+file_exists_behavior: OVERWRITE
+hooks:
+  ApplicationStop:
+    - location: scripts/application_stop.sh
+      timeout: 120
+      runas: root
+  ApplicationStart:
+    - location: scripts/application_start.sh
+      timeout: 300
+      runas: root
+  ValidateService:
+    - location: scripts/validate_service.sh
+      timeout: 300
+      runas: root

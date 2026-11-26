@@ -1,0 +1,19 @@
+# CodePipeline — EC2 deploy note for {{app_name}}
+# ------------------------------------------------------------
+# The CodePipeline deploy stage is **not** YAML. It is provisioned by the
+# Terraform `codepipeline` module (deploy_target = "ec2") under
+# `infra/modules/codepipeline/` and runs automatically after the Build stage.
+#
+# Deploy mechanics:
+#   • Pipeline source  : CodeCommit, the repo's default branch {{branch}}.
+#   • Build stage      : CodeBuild runs the committed `cicd/buildspec.yml`; it
+#                        uploads the build to the artifact bucket and assembles a
+#                        CodeDeploy revision: `cicd/codedeploy/appspec.yml` +
+#                        `cicd/codedeploy/scripts/*.sh` + the app under `app/`.
+#   • Deploy stage     : CodeDeploy in-place, one instance at a time, behind the
+#                        ALB target group, auto-rollback on failure. The agent is
+#                        installed on the ASG instances by an SSM association.
+#
+# On each instance: release → {{install_dir}}, then systemd unit
+# `{{service_name}}` is restarted and `{{health_check_path}}` must answer 200 on
+# port {{container_port}}. Override install_dir / service_name on the app record.

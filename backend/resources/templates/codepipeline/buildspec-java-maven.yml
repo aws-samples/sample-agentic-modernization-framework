@@ -1,0 +1,156 @@
+# AWS CodeBuild buildspec for {{app_name}} — Java + Maven.
+# Committed to cicd/buildspec.yml and run by the CodeBuild project of the
+# Terraform `codepipeline` module (var.buildspec) — the single source of truth.
+# Stages: unit tests + JaCoCo coverage gate, then
+#   container targets: docker build + ECR push + imagedefinitions.json
+#   EC2 targets:       JAR(s) uploaded to the app's artifact bucket + CodeDeploy revision
+#   Lambda targets:    function package uploaded, then deployed (update-function-code + smoke invoke)
+# "#@if" / "#@endif" lines are AMF template markers (container / artifact = EC2 / lambda).
+version: 0.2
+
+env:
+  variables:
+    AWS_REGION: {{aws_region}}
+    ECR_REPO: {{ecr_repo}}
+    CONTAINER_NAME: {{container_name}}
+    JAVA_VERSION: "{{java_version}}"
+    BUILD_DIR: "{{build_dir}}"
+    COVERAGE_THRESHOLD: "{{coverage_threshold}}"
+    COVERAGE_OPT_OUT_REASON: "{{coverage_reason}}"
+    JACOCO_VERSION: "0.8.14"  # 0.8.14+ instruments Java 25 class files (0.8.12 fails); fine for 8–21 too
+#@if container
+    DOCKERHUB_MIRROR: "{{dockerhub_mirror}}"
+#@endif
+    ARTIFACT_BUCKET: "{{artifact_bucket}}"
+    FUNCTION_NAME: "{{function_name}}"
+
+phases:
+  install:
+    runtime-versions:
+      java: corretto{{java_version}}
+      python: 3.11
+    commands:
+      - mvn --version
+  pre_build:
+    on-failure: ABORT
+    commands:
+      # One immutable tag per commit (the ECR repo is IMMUTABLE); never a moving tag.
+      - IMAGE_TAG=${CODEBUILD_RESOLVED_SOURCE_VERSION:-build-${CODEBUILD_BUILD_NUMBER}}
+#@if container
+      - ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+      - ECR_URI=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}
+      - aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+#@endif
+  build:
+    on-failure: ABORT
+    commands:
+      # Unit tests + coverage gate (multi-module: `verify` at the build root).
+      - (cd "$BUILD_DIR" && mvn -B -ntp org.jacoco:jacoco-maven-plugin:${JACOCO_VERSION}:prepare-agent verify org.jacoco:jacoco-maven-plugin:${JACOCO_VERSION}:report)
+      # Threshold 0 = explicit per-app opt-out (coverage_threshold_reason on the app).
+      - |
+        if [ "$COVERAGE_THRESHOLD" = "0" ]; then
+          echo "Coverage gate DISABLED for {{app_name}} (per-app opt-out): ${COVERAGE_OPT_OUT_REASON}"
+        else
+          FILES=$(find "$BUILD_DIR" -path '*/target/site/jacoco/jacoco.csv')
+          if [ -z "$FILES" ]; then echo "No JaCoCo report produced (no unit tests ran) - coverage gate fails."; exit 1; fi
+          awk -F, -v t="$COVERAGE_THRESHOLD" 'FNR > 1 { m += $8; c += $9 } END { tot = m + c; pct = (tot > 0) ? 100 * c / tot : 0; printf "Line coverage: %.1f%% (threshold %s%%)\n", pct, t; if (pct < t) exit 1 }' $FILES
+        fi
+#@if container
+      - |
+        # The largest jar is the executable one (a Boot build also emits a plain jar).
+        JAR=$(find "$BUILD_DIR" -path '*/target/*.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar' ! -name 'original-*.jar' -printf '%s %p\n' | sort -rn | head -1 | cut -d' ' -f2-)
+        if [ -z "$JAR" ]; then echo "No executable jar under $BUILD_DIR/**/target"; exit 1; fi
+        mkdir -p "$BUILD_DIR/build" && cp "$JAR" "$BUILD_DIR/build/app.jar"
+      - |
+        # Docker Hub rate-limits CodeBuild's shared IPs (HTTP 429 on FROM pulls). Pull unqualified official images
+        # (FROM name[:tag]) through the ECR Public mirror of Docker Official Images instead. Images that name a
+        # registry/namespace, ${ARG} images, scratch and multi-stage aliases are left as they are.
+        if [ -n "$DOCKERHUB_MIRROR" ] && [ -f "$BUILD_DIR/Dockerfile" ]; then
+          awk -v M="$DOCKERHUB_MIRROR" '
+            /^[[:space:]]*[Ff][Rr][Oo][Mm][[:space:]]/ {
+              n = split($0, a, /[[:space:]]+/); i = 2; if (a[i] ~ /^--/) i++
+              img = a[i]; base = img; sub(/[:@].*/, "", base)
+              if (!(tolower(base) in alias) && img !~ /\// && img !~ /^\$/ && tolower(img) != "scratch") {
+                a[i] = M "/" img; line = a[1]; for (k = 2; k <= n; k++) line = line " " a[k]; $0 = line
+              }
+              for (k = 1; k < n; k++) if (tolower(a[k]) == "as") alias[tolower(a[k + 1])] = 1
+            }
+            { print }' "$BUILD_DIR/Dockerfile" > /tmp/Dockerfile.mirrored && mv /tmp/Dockerfile.mirrored "$BUILD_DIR/Dockerfile"
+          grep -i '^[[:space:]]*FROM' "$BUILD_DIR/Dockerfile"
+        fi
+      - docker build -t ${ECR_URI}:${IMAGE_TAG} "$BUILD_DIR"
+#@endif
+  post_build:
+    commands:
+#@if container
+      # Immutable tags: a re-run of the same commit (deploy retry) reuses the image already pushed.
+      - |
+        if [ "$(aws ecr batch-get-image --repository-name "${ECR_REPO}" --image-ids imageTag="${IMAGE_TAG}" --query 'length(images)' --output text)" = "1" ]; then
+          echo "${ECR_URI}:${IMAGE_TAG} already in ECR (immutable tag); reusing it"
+        else
+          docker push ${ECR_URI}:${IMAGE_TAG}
+        fi
+      - printf '[{"name":"%s","imageUri":"%s"}]' "${CONTAINER_NAME}" "${ECR_URI}:${IMAGE_TAG}" > imagedefinitions.json
+      - cat imagedefinitions.json
+#@endif
+#@if artifact
+      - |
+        JARS=$(find "$BUILD_DIR" -path '*/target/*.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar' ! -name 'original-*.jar')
+        if [ -z "$JARS" ]; then echo "No **/target/*.jar produced"; exit 1; fi
+        for j in $JARS; do aws s3 cp "$j" "s3://${ARTIFACT_BUCKET}/{{app_name}}/${IMAGE_TAG}/$(basename "$j")"; done
+      # CodeDeploy revision for the Deploy stage: appspec.yml + hook scripts
+      # (committed under cicd/codedeploy/) + the app under app/.
+      - rm -rf revision && mkdir -p revision/app revision/scripts
+      - cp cicd/codedeploy/appspec.yml revision/ && cp cicd/codedeploy/scripts/*.sh revision/scripts/ && chmod +x revision/scripts/*.sh
+      - for j in $(find "$BUILD_DIR" -path '*/target/*.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar' ! -name 'original-*.jar'); do cp "$j" revision/app/; done
+#@endif
+#@if lambda
+      - |
+        JAR=$(find "$BUILD_DIR" -path '*/target/*.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar' ! -name 'original-*.jar' -printf '%s %p\n' | sort -rn | head -1 | cut -d' ' -f2-)
+        if [ -z "$JAR" ]; then echo "No self-contained jar produced for the function package"; exit 1; fi
+        cp "$JAR" /tmp/function.zip
+      - aws s3 cp /tmp/function.zip "s3://${ARTIFACT_BUCKET}/{{app_name}}/${IMAGE_TAG}/function.zip"
+      # Deploy: point the function at the new package, publish a version, smoke-invoke
+      # the health path (the API route needs SigV4/JWT, so invoke the function directly).
+      - |
+        # Every function of the app gets the same package (multi-function apps: FUNCTION_NAMES).
+        for FN in ${FUNCTION_NAMES:-$FUNCTION_NAME}; do
+          V=$(aws lambda update-function-code --function-name "$FN" --s3-bucket "$ARTIFACT_BUCKET" \
+            --s3-key "{{app_name}}/${IMAGE_TAG}/function.zip" --publish --query Version --output text)
+          aws lambda wait function-updated-v2 --function-name "$FN"
+          echo "$FN -> version $V"
+          [ "$FN" = "{{smoke_function}}" ] && VERSION=$V
+        done
+        VERSION=${VERSION:-$V}
+        PAYLOAD='{{smoke_payload}}'
+        aws lambda invoke --function-name "{{smoke_function}}:${VERSION}" --cli-binary-format raw-in-base64-out \
+          --payload "$PAYLOAD" /tmp/out.json > /tmp/meta.json
+        cat /tmp/out.json
+        if grep -q FunctionError /tmp/meta.json; then echo "Function error"; exit 1; fi
+        python3 -c "import json,sys; s=json.load(open('/tmp/out.json')).get('statusCode'); print('statusCode', s); sys.exit(0 if s == 200 else 1)"
+        printf '{"functions":"%s","smoke_version":"%s","package":"%s"}' "${FUNCTION_NAMES:-$FUNCTION_NAME}" "$VERSION" "{{app_name}}/${IMAGE_TAG}/function.zip" > deploy.json
+#@endif
+
+reports:
+  surefire:
+    files:
+      - "**/target/surefire-reports/*.xml"
+    file-format: JUNITXML
+
+artifacts:
+#@if container
+  files:
+    - imagedefinitions.json
+  discard-paths: yes
+#@endif
+#@if artifact
+  # The CodeDeploy revision (appspec.yml at the root).
+  base-directory: revision
+  files:
+    - "**/*"
+#@endif
+#@if lambda
+  files:
+    - deploy.json
+  discard-paths: yes
+#@endif

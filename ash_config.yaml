@@ -1,0 +1,116 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/tags/v3.7.0/automated_security_helper/schemas/AshConfig.json
+# ASH v3.7 configuration. Keep fail_on_findings enabled: security findings must
+# remain a blocking signal rather than being converted into a passing pipeline.
+project_name: amf
+
+global_settings:
+  severity_threshold: MEDIUM
+  ignore_paths:
+    - path: "backend/.venv/**"
+      reason: "Local virtual environment dependencies"
+    - path: "frontend/node_modules/**"
+      reason: "Third-party frontend dependencies"
+    - path: "**/__pycache__/**"
+      reason: "Generated Python bytecode cache"
+    - path: ".git/**"
+      reason: "Git metadata"
+    - path: "*.pyc"
+      reason: "Generated Python bytecode"
+    - path: "input/**"
+      reason: "Runtime input data"
+    - path: "backend/src/worker/dockerfile_gen.py"
+      reason: "Python fallback Dockerfile GENERATOR — writes a Dockerfile into the customer repo only when ATX emits none. checkov misdetects its embedded FROM string as a real Dockerfile; HEALTHCHECK/USER/tag-pinning are customer-authored in the emitted file. The platform's own worker image is docker/Dockerfile.worker."
+  # Rule suppressions live inline next to the code they cover (#checkov:skip=ID:reason in the
+  # resource block; a "# kics-scan disable=" header listing each query + reason per file), so
+  # they don't drift when lines move. Global Checkov deferrals: infra/.checkov.yaml.
+
+fail_on_findings: true
+
+converters:
+  archive:
+    enabled: false
+  jupyter:
+    enabled: false
+
+scanners:
+  bandit:
+    enabled: true
+    options:
+      # Test code isn't shipped or deployed; on the default branch its ~2,000 B101 (assert)
+      # Lows flooded the GitLab Vulnerability Report. Product code stays fully scanned.
+      excluded_paths:
+        - path: "backend/tests/**"
+          reason: "Unit tests (pytest asserts, fake credentials, literal attack inputs); not shipped"
+      # Lambda tests live beside the handlers (lambda-src/test_*.py), and ASH excluded_paths
+      # only match directories, so B101 in them is skipped through bandit.yaml instead.
+      config_file: bandit.yaml
+  cdk-nag:
+    enabled: false
+  cfn-nag:
+    enabled: false
+  checkov:
+    enabled: true
+    options:
+      frameworks:
+        - all
+      config_file: infra/.checkov.yaml
+  detect-secrets:
+    enabled: true
+    options: {}
+  grype:
+    enabled: true
+    options: {}
+  npm-audit:
+    enabled: false
+  opengrep:
+    enabled: false
+  semgrep:
+    enabled: true
+    options:
+      config: p/ci
+      metrics: "off"
+  syft:
+    enabled: false
+
+reporters:
+  csv:
+    enabled: false
+  cyclonedx:
+    enabled: true
+    options: {}
+  flat-json:
+    enabled: true
+    options:
+      include_metadata: true
+      include_scanner_metrics: true
+      include_summary_metrics: true
+  gitlab-cyclonedx:
+    enabled: false
+  gitlab-sast:
+    enabled: true
+    options:
+      # Suppressed findings carry their reason inline (#checkov:skip / nosec / nosemgrep) and stay
+      # in the SARIF/HTML reports; exporting them to GitLab only re-opened them as "detected".
+      exclude_suppressed: true
+  github-ghas:
+    enabled: false
+  html:
+    enabled: true
+    options: {}
+  junitxml:
+    enabled: true
+    options:
+      respect_severity_threshold: true
+  markdown:
+    enabled: false
+  ocsf:
+    enabled: false
+  sarif:
+    enabled: true
+    options: {}
+  spdx:
+    enabled: false
+  text:
+    enabled: false
+  yaml:
+    enabled: false

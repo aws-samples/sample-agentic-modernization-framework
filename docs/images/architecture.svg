@@ -1,0 +1,149 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="780" viewBox="0 0 1080 780" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#5a6b7b"/>
+    </marker>
+    <marker id="arrowDash" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#e7157b"/>
+    </marker>
+    <style>
+      .grp   { fill:none; stroke-width:1.5; stroke-dasharray:6 4; }
+      .grpl  { font-size:12px; font-weight:700; letter-spacing:.3px; }
+      .card  { fill:#ffffff; stroke:#d5dbdb; stroke-width:1; rx:6; }
+      .name  { font-size:12.5px; font-weight:700; fill:#16191f; }
+      .sub   { font-size:10.5px; fill:#5a6b7b; }
+      .edge  { stroke:#5a6b7b; stroke-width:1.5; fill:none; }
+      .elbl  { font-size:10px; fill:#414d5c; }
+      .cb    { rx:4; }
+    </style>
+  </defs>
+
+  <rect width="1080" height="780" fill="#f7f8fa"/>
+  <text x="24" y="34" font-size="19" font-weight="700" fill="#16191f">AMF — AWS Architecture (Bedrock AgentCore)</text>
+
+  <!-- Users -->
+  <rect class="card" x="450" y="52" width="180" height="46" rx="6"/>
+  <rect class="cb" x="462" y="63" width="24" height="24" fill="#232f3e"/>
+  <text class="name" x="496" y="72">Users / Browser</text>
+  <text class="sub"  x="496" y="87">React + CloudScape (Vite)</text>
+
+  <!-- AWS Cloud boundary -->
+  <rect class="grp" x="24" y="116" width="1032" height="640" rx="10" stroke="#232f3e"/>
+  <text class="grpl" x="40" y="136" fill="#232f3e">☁  AWS Cloud</text>
+
+  <!-- Backend API -->
+  <rect class="card" x="430" y="150" width="220" height="52" rx="6"/>
+  <rect class="cb" x="442" y="162" width="24" height="24" fill="#ed7100"/>
+  <text class="name" x="476" y="171">Backend API — FastAPI</text>
+  <text class="sub"  x="476" y="186">control plane · DynamoDB/S3 · start/approve</text>
+
+  <!-- Step Functions -->
+  <rect class="card" x="410" y="238" width="260" height="56" rx="6"/>
+  <rect class="cb" x="424" y="252" width="26" height="26" fill="#e7157b"/>
+  <text class="name" x="460" y="263">AWS Step Functions</text>
+  <text class="sub"  x="460" y="278">{prefix}-agentcore-workflow · gates</text>
+
+  <!-- AgentCore group -->
+  <rect class="grp" x="48" y="336" width="560" height="330" rx="10" stroke="#01a88d"/>
+  <text class="grpl" x="64" y="357" fill="#01a88d">Amazon Bedrock AgentCore</text>
+
+  <rect class="card" x="76" y="374" width="228" height="56" rx="6"/>
+  <rect class="cb" x="90" y="388" width="26" height="26" fill="#01a88d"/>
+  <text class="name" x="126" y="399">AgentCore Harness</text>
+  <text class="sub"  x="126" y="414">declarative agent (Claude)</text>
+
+  <rect class="card" x="352" y="374" width="228" height="56" rx="6"/>
+  <rect class="cb" x="366" y="388" width="26" height="26" fill="#01a88d"/>
+  <text class="name" x="402" y="399">MCP Gateway</text>
+  <text class="sub"  x="402" y="414">5 tool targets</text>
+
+  <rect class="card" x="76" y="470" width="228" height="56" rx="6"/>
+  <rect class="cb" x="90" y="484" width="26" height="26" fill="#01a88d"/>
+  <text class="name" x="126" y="495">Amazon Bedrock</text>
+  <text class="sub"  x="126" y="510">model inference</text>
+
+  <rect class="card" x="352" y="470" width="228" height="80" rx="6"/>
+  <rect class="cb" x="366" y="484" width="26" height="26" fill="#ed7100"/>
+  <text class="name" x="402" y="495">AWS Lambda — MCP tools</text>
+  <text class="sub"  x="402" y="510">portfolio · strategy · planning</text>
+  <text class="sub"  x="402" y="523">documents · execution</text>
+  <text class="sub"  x="366" y="540">+ invoke-runtime bridge (SFN ↔ Harness)</text>
+
+  <!-- VPC group -->
+  <rect class="grp" x="640" y="336" width="392" height="150" rx="10" stroke="#8c4fff"/>
+  <text class="grpl" x="656" y="357" fill="#8c4fff">VPC · public subnets</text>
+
+  <rect class="card" x="668" y="374" width="336" height="80" rx="6"/>
+  <rect class="cb" x="682" y="388" width="26" height="26" fill="#ed7100"/>
+  <text class="name" x="718" y="399">ECS Fargate — ATX worker</text>
+  <text class="sub"  x="718" y="414">MODE = code-analysis | workbench</text>
+  <text class="sub"  x="682" y="438">clone → AWS Transform (ATX) → S3 + ANALYSIS# → callback</text>
+
+  <!-- Data & registry group -->
+  <rect class="grp" x="640" y="512" width="392" height="230" rx="10" stroke="#5a6b7b"/>
+  <text class="grpl" x="656" y="533" fill="#5a6b7b">Data &amp; registry</text>
+
+  <rect class="card" x="664" y="548" width="176" height="56" rx="6"/>
+  <rect class="cb" x="678" y="562" width="26" height="26" fill="#c925d1"/>
+  <text class="name" x="714" y="573">Amazon DynamoDB</text>
+  <text class="sub"  x="714" y="588">single table</text>
+
+  <rect class="card" x="852" y="548" width="152" height="56" rx="6"/>
+  <rect class="cb" x="866" y="562" width="26" height="26" fill="#7aa116"/>
+  <text class="name" x="902" y="573">Amazon S3</text>
+  <text class="sub"  x="902" y="588">reports / artifacts</text>
+
+  <rect class="card" x="664" y="622" width="176" height="52" rx="6"/>
+  <rect class="cb" x="678" y="634" width="26" height="26" fill="#ed7100"/>
+  <text class="name" x="714" y="645">Amazon ECR</text>
+  <text class="sub"  x="714" y="660">worker image</text>
+
+  <rect class="card" x="852" y="622" width="152" height="52" rx="6"/>
+  <rect class="cb" x="866" y="634" width="26" height="26" fill="#dd344c"/>
+  <text class="name" x="902" y="645">Secrets Mgr</text>
+  <text class="sub"  x="902" y="660">GitHub token</text>
+
+  <!-- Edges -->
+  <!-- Users -> API -->
+  <path class="edge" d="M540,98 L540,150" marker-end="url(#arrow)"/>
+  <text class="elbl" x="548" y="128">HTTPS / REST</text>
+
+  <!-- API -> Step Functions -->
+  <path class="edge" d="M540,202 L540,238" marker-end="url(#arrow)"/>
+  <text class="elbl" x="548" y="224">start / approve</text>
+
+  <!-- Step Functions -> Harness -->
+  <path class="edge" d="M410,278 L305,388" marker-end="url(#arrow)"/>
+  <text class="elbl" x="300" y="330">invokeHarness</text>
+
+  <!-- Step Functions -> ECS (LaunchATX via execution Lambda) -->
+  <path class="edge" d="M670,272 L820,374" marker-end="url(#arrow)"/>
+  <text class="elbl" x="690" y="316">LaunchATX → ECS</text>
+
+  <!-- ECS -> Step Functions callback (dashed pink) -->
+  <path d="M820,374 L672,286" stroke="#e7157b" stroke-width="1.4" fill="none" stroke-dasharray="5 3" marker-end="url(#arrowDash)"/>
+  <text class="elbl" x="700" y="352" fill="#e7157b">SendTaskSuccess</text>
+
+  <!-- Harness -> MCP Gateway -->
+  <path class="edge" d="M304,402 L352,402" marker-end="url(#arrow)"/>
+  <text class="elbl" x="310" y="396">MCP</text>
+
+  <!-- MCP Gateway -> Lambda tools -->
+  <path class="edge" d="M466,430 L466,470" marker-end="url(#arrow)"/>
+  <text class="elbl" x="472" y="454">invoke</text>
+
+  <!-- Harness -> Bedrock -->
+  <path class="edge" d="M190,430 L190,470" marker-end="url(#arrow)"/>
+  <text class="elbl" x="196" y="454">model</text>
+
+  <!-- Lambda tools -> DynamoDB / S3 -->
+  <path class="edge" d="M580,512 L664,566" marker-end="url(#arrow)"/>
+  <text class="elbl" x="588" y="536">read / write</text>
+
+  <!-- ECS -> S3 / DynamoDB -->
+  <path class="edge" d="M900,454 L910,548" marker-end="url(#arrow)"/>
+  <path class="edge" d="M780,454 L760,548" marker-end="url(#arrow)"/>
+
+  <!-- ECS -> ECR (image pull) -->
+  <path class="edge" d="M720,454 L730,622" marker-end="url(#arrow)"/>
+</svg>

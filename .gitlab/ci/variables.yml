@@ -1,0 +1,26 @@
+# =============================================================================
+# Pipeline Variables — UNO Unified Orchestrator
+# =============================================================================
+# No account IDs or account-specific bucket names live in this file. Set these
+# in GitLab > Settings > CI/CD > Variables (project or group level) — a project
+# variable takes precedence over a same-named entry here:
+#   AWS_ACCOUNT_ID           12-digit AWS account the pipeline targets
+#   SECURITY_REPORTS_BUCKET  S3 bucket the upload-security-report job writes to
+#                            (e.g. haf-core-security-reports-<region-abbr>-<account>)
+#   AWS_ROLE_ARN             (optional) override the derived role ARN below
+# =============================================================================
+variables:
+  AWS_REGION: us-east-1
+  AWS_DEFAULT_REGION: us-east-1
+  AWS_ROLE_ARN: "arn:aws:iam::${AWS_ACCOUNT_ID}:role/amf-gitlab-role"
+  # CI Terraform. The worker image pins its own TF_VERSION (docker/Dockerfile.worker
+  # ARG, currently 1.9.8) — the two differ; align deliberately, not by accident.
+  TF_VERSION: "1.14.6"
+  ENVIRONMENT: nprd
+  MISE_DATA_DIR: $CI_PROJECT_DIR/.mise/mise-data
+  APP_PREFIX: "amf"
+  S3_BUCKET_PREFIX: "hafuno"
+  # Mandatory Tagging
+  CORRELATION_ID: ""
+  CREATED_BY: ""
+  CONTACT_DL: ""

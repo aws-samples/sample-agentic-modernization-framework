@@ -1,0 +1,707 @@
+{
+ "_comment": "Test catalogue for scripts/e2e_golden.py --catalog (docs/test-apps-codecommit.md). Every repo is linked on branch atx-run7 = the original upstream code before any AMF/ATX change (2026-11-04). target_account is injected by e2e_golden.py. Close-out apps (retire/retain/repurchase) have no assessment_inputs.",
+ "apps": {
+  "APP-TE": {
+   "create": {
+    "app_name": "PetClinic (Telecom Engine)",
+    "business_unit": "Telecom",
+    "language": "Java",
+    "framework": "Spring Boot 1.5",
+    "architecture": "monolith",
+    "description": "Spring PetClinic monolith, Spring Boot 1.5 / Java 8, MySQL, on a VM. Replatform to ECS Fargate + RDS MySQL.",
+    "repos": [
+     {
+      "name": "amazon-ecs-java-microservices",
+      "url": "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/amazon-ecs-java-microservices",
+      "branch": "atx-run7",
+      "language": "Java"
+     }
+    ],
+    "tier": "tier_3",
+    "compliance": [
+     "none"
+    ],
+    "rpo": "4 hours",
+    "rto": "8 hours",
+    "uptime_sla": "99.9%",
+    "target_region": "us-east-1",
+    "data_classification": "internal",
+    "deployment_method": "manual",
+    "owners": [
+     {
+      "name": "AMF Test",
+      "email": "amf-test@example.com",
+      "role": "tech_lead"
+     }
+    ]
+   },
+   "put": {
+    "repos": [
+     {
+      "name": "amazon-ecs-java-microservices",
+      "url": "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/amazon-ecs-java-microservices",
+      "branch": "atx-run7",
+      "language": "Java"
+     }
+    ],
+    "current_compute": "on-prem VM (Java 8)",
+    "database": "MySQL 5.7",
+    "build_dir": "1_ECS_Java_Spring_PetClinic"
+   },
+   "discovery_strategy": "replatform",
+   "assessment_inputs": {
+    "cicd_target": "codepipeline",
+    "vpc_cidr": "10.40.0.0/16",
+    "target_compute": "ecs_fargate",
+    "target_database": "rds_mysql",
+    "db_instance_class": "db.t4g.medium"
+   }
+  },
+  "APP-HE": {
+   "create": {
+    "app_name": "Unicorn Store (Health Engine)",
+    "business_unit": "Health",
+    "language": "Java",
+    "framework": "Spring Boot",
+    "architecture": "monolith",
+    "description": "Unicorn Store Spring Boot service, JPA + PostgreSQL, EventBridge. Replatform to ECS Fargate + RDS PostgreSQL.",
+    "repos": [
+     {
+      "name": "java-on-aws",
+      "url": "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/java-on-aws",
+      "branch": "atx-run7",
+      "language": "Java"
+     }
+    ],
+    "tier": "tier_3",
+    "compliance": [
+     "none"
+    ],
+    "rpo": "4 hours",
+    "rto": "8 hours",
+    "uptime_sla": "99.9%",
+    "target_region": "us-east-1",
+    "data_classification": "internal",
+    "deployment_method": "manual",
+    "owners": [
+     {
+      "name": "AMF Test",
+      "email": "amf-test@example.com",
+      "role": "tech_lead"
+     }
+    ]
+   },
+   "put": {
+    "repos": [
+     {
+      "name": "java-on-aws",
+      "url": "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/java-on-aws",
+      "branch": "atx-run7",
+      "language": "Java"
+     }
+    ],
+    "current_compute": "on-prem VM",
+    "database": "PostgreSQL",
+    "build_dir": "apps/unicorn-store-spring"
+   },
+   "discovery_strategy": "replatform",
+   "assessment_inputs": {
+    "cicd_target": "codepipeline",
+    "vpc_cidr": "10.40.0.0/16",
+    "target_compute": "ecs_fargate",
+    "target_database": "rds_postgresql",
+    "db_instance_class": "db.t4g.medium"
+   }
+  },
+  "APP-CLI": {
+   "create": {
+    "app_name": "Product Catalog API",
+    "business_unit": "Retail",
+    "language": "Java",
+    "framework": "Spring Cloud Function",
+    "architecture": "serverless",
+    "description": "Products API: 4 Java 17 functions behind API Gateway, DynamoDB (SAM). Replatform to Terraform-managed Lambda + DynamoDB.",
+    "repos": [
+     {
+      "name": "serverless-java-frameworks-samples",
+      "url": "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/serverless-java-frameworks-samples",
+      "branch": "atx-run7",
+      "language": "Java"
+     }
+    ],
+    "tier": "tier_3",
+    "compliance": [
+     "none"
+    ],
+    "rpo": "4 hours",
+    "rto": "8 hours",
+    "uptime_sla": "99.9%",
+    "target_region": "us-east-1",
+    "data_classification": "internal",
+    "deployment_method": "manual",
+    "owners": [
+     {
+      "name": "AMF Test",
+      "email": "amf-test@example.com",
+      "role": "tech_lead"
+     }
+    ]
+   },
+   "put": {
+    "repos": [
+     {
+      "name": "serverless-java-frameworks-samples",
+      "url": "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/serverless-java-frameworks-samples",
+      "branch": "atx-run7",
+      "language": "Java"
+     }
+    ],
+    "current_compute": "AWS SAM (another account)",
+    "database": "DynamoDB",
+    "build_dir": "springboot"
+   },
+   "discovery_strategy": "replatform",
+   "assessment_inputs": {
+    "cicd_target": "codepipeline",
+    "vpc_cidr": "10.40.0.0/16",
+    "target_compute": "lambda",
+    "target_database": "dynamodb"
+   }
+  },
+  "APP-MUSIC": {
+   "create": {
+    "app_name": "Music API v2 (Flask)",
+    "business_unit": "Media",
+    "language": "Python",
+    "framework": "Flask",
+    "architecture": "monolith",
+    "description": "Flask REST API (best-music catalogue), Python 3.8 (EOL), DynamoDB musicTable, single Docker host. Replatform to ECS Fargate + DynamoDB.",
+    "repos": [
+     {
+      "name": "deploy-python-flask-microservices-to-aws-using-open-source-tools-part2",
+      "url": "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/deploy-python-flask-microservices-to-aws-using-open-source-tools-part2",
+      "branch": "atx-run7",
+      "language": "Python"
+     }
+    ],
+    "tier": "tier_3",
+    "compliance": [
+     "none"
+    ],
+    "rpo": "4 hours",
+    "rto": "8 hours",
+    "uptime_sla": "99.9%",
+    "target_region": "us-east-1",
+    "data_classification": "internal",
+    "deployment_method": "manual",
+    "owners": [
+     {
+      "name": "AMF Test",
+      "email": "amf-test@example.com",
+      "role": "tech_lead"
+     }
+    ]
+   },
+   "put": {
+    "repos": [
+     {
+      "name": "deploy-python-flask-microservices-to-aws-using-open-source-tools-part2",
+      "url": "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/deploy-python-flask-microservices-to-aws-using-open-source-tools-part2",
+      "branch": "atx-run7",
+      "language": "Python"
+     }
+    ],
+    "current_compute": "on-prem Docker host",
+    "database": "DynamoDB",
+    "containerization": "docker"
+   },
+   "discovery_strategy": "replatform",
+   "assessment_inputs": {
+    "cicd_target": "codepipeline",
+    "vpc_cidr": "10.40.0.0/16",
+    "target_compute": "ecs_fargate",
+    "target_database": "dynamodb"
+   }
+  },
+  "APP-MUSIC-V1": {
+   "create": {
+    "app_name": "Music API v1 (Flask)",
+    "business_unit": "Media",
+    "language": "Python",
+    "framework": "Flask",
+    "architecture": "monolith",
+    "description": "Part 1 of the Flask music API (app/ + Dockerfile), DynamoDB musicTable. Replatform to ECS Fargate + DynamoDB.",
+    "repos": [
+     {
+      "name": "deploy-python-flask-microservices-to-aws-using-open-source-tools",
+      "url": "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/deploy-python-flask-microservices-to-aws-using-open-source-tools",
+      "branch": "atx-run7",
+      "language": "Python"
+     }
+    ],
+    "tier": "tier_3",
+    "compliance": [
+     "none"
+    ],
+    "rpo": "4 hours",
+    "rto": "8 hours",
+    "uptime_sla": "99.9%",
+    "target_region": "us-east-1",
+    "data_classification": "internal",
+    "deployment_method": "manual",
+    "owners": [
+     {
+      "name": "AMF Test",
+      "email": "amf-test@example.com",
+      "role": "tech_lead"
+     }
+    ]
+   },
+   "put": {
+    "repos": [
+     {
+      "name": "deploy-python-flask-microservices-to-aws-using-open-source-tools",
+      "url": "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/deploy-python-flask-microservices-to-aws-using-open-source-tools",
+      "branch": "atx-run7",
+      "language": "Python"
+     }
+    ],
+    "current_compute": "on-prem Docker host",
+    "database": "DynamoDB",
+    "build_dir": "app",
+    "containerization": "docker"
+   },
+   "discovery_strategy": "replatform",
+   "assessment_inputs": {
+    "cicd_target": "codepipeline",
+    "vpc_cidr": "10.40.0.0/16",
+    "target_compute": "ecs_fargate",
+    "target_database": "dynamodb"
+   }
+  },
+  "APP-UNISHOP": {
+   "create": {
+    "app_name": "Unishop monolith",
+    "business_unit": "Retail",
+    "language": "Java",
+    "framework": "Spring Boot",
+    "architecture": "monolith",
+    "description": "Unishop legacy monolith (MonoToMicroLegacy), Spring Boot, Gradle, MySQL. Refactor stage 1: ECS Fargate + RDS MySQL.",
+    "repos": [
+     {
+      "name": "unishop-monolith-to-microservices",
+      "url": "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/unishop-monolith-to-microservices",
+      "branch": "atx-run7",
+      "language": "Java"
+     }
+    ],
+    "tier": "tier_3",
+    "compliance": [
+     "none"
+    ],
+    "rpo": "4 hours",
+    "rto": "8 hours",
+    "uptime_sla": "99.9%",
+    "target_region": "us-east-1",
+    "data_classification": "internal",
+    "deployment_method": "manual",
+    "owners": [
+     {
+      "name": "AMF Test",
+      "email": "amf-test@example.com",
+      "role": "tech_lead"
+     }
+    ]
+   },
+   "put": {
+    "repos": [
+     {
+      "name": "unishop-monolith-to-microservices",
+      "url": "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/unishop-monolith-to-microservices",
+      "branch": "atx-run7",
+      "language": "Java"
+     }
+    ],
+    "current_compute": "on-prem VM",
+    "database": "MySQL",
+    "build_dir": "MonoToMicroLegacy"
+   },
+   "discovery_strategy": "refactor",
+   "assessment_inputs": {
+    "cicd_target": "codepipeline",
+    "vpc_cidr": "10.40.0.0/16",
+    "target_compute": "ecs_fargate",
+    "target_database": "rds_mysql",
+    "db_instance_class": "db.t4g.medium"
+   }
+  },
+  "APP-UNISHOP-SVC": {
+   "create": {
+    "app_name": "Unishop services",
+    "business_unit": "Retail",
+    "language": "Java",
+    "framework": "AWS Lambda",
+    "architecture": "microservices",
+    "description": "Unishop extracted services (MonoToMicroLambda, 5 Java functions, Gradle) + DynamoDB. Refactor stage 2: Lambda + DynamoDB.",
+    "repos": [
+     {
+      "name": "unishop-monolith-to-microservices",
+      "url": "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/unishop-monolith-to-microservices",
+      "branch": "atx-run7",
+      "language": "Java"
+     }
+    ],
+    "tier": "tier_3",
+    "compliance": [
+     "none"
+    ],
+    "rpo": "4 hours",
+    "rto": "8 hours",
+    "uptime_sla": "99.9%",
+    "target_region": "us-east-1",
+    "data_classification": "internal",
+    "deployment_method": "manual",
+    "owners": [
+     {
+      "name": "AMF Test",
+      "email": "amf-test@example.com",
+      "role": "tech_lead"
+     }
+    ]
+   },
+   "put": {
+    "repos": [
+     {
+      "name": "unishop-monolith-to-microservices",
+      "url": "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/unishop-monolith-to-microservices",
+      "branch": "atx-run7",
+      "language": "Java"
+     }
+    ],
+    "current_compute": "n/a (new services)",
+    "database": "DynamoDB",
+    "build_dir": "MonoToMicroLambda"
+   },
+   "discovery_strategy": "refactor",
+   "assessment_inputs": {
+    "cicd_target": "codepipeline",
+    "vpc_cidr": "10.40.0.0/16",
+    "target_compute": "lambda",
+    "target_database": "dynamodb"
+   }
+  },
+  "APP-WEBAPP": {
+   "create": {
+    "app_name": "Java web app (WAR)",
+    "business_unit": "Corporate",
+    "language": "Java",
+    "framework": "Servlet/JSP on Tomcat 9",
+    "architecture": "monolith",
+    "description": "Legacy WAR on Tomcat 9 with MySQL (sample-webapp). Replatform to ECS Fargate + RDS MySQL. NEEDS a Tomcat Dockerfile in sample-webapp/ (AMF generates JAR images only).",
+    "repos": [
+     {
+      "name": "replatform-java-webapp-on-aws",
+      "url": "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/replatform-java-webapp-on-aws",
+      "branch": "atx-run7",
+      "language": "Java"
+     }
+    ],
+    "tier": "tier_3",
+    "compliance": [
+     "none"
+    ],
+    "rpo": "4 hours",
+    "rto": "8 hours",
+    "uptime_sla": "99.9%",
+    "target_region": "us-east-1",
+    "data_classification": "internal",
+    "deployment_method": "manual",
+    "owners": [
+     {
+      "name": "AMF Test",
+      "email": "amf-test@example.com",
+      "role": "tech_lead"
+     }
+    ]
+   },
+   "put": {
+    "repos": [
+     {
+      "name": "replatform-java-webapp-on-aws",
+      "url": "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/replatform-java-webapp-on-aws",
+      "branch": "atx-run7",
+      "language": "Java"
+     }
+    ],
+    "current_compute": "on-prem Tomcat 9 VM",
+    "database": "MySQL",
+    "build_dir": "sample-webapp"
+   },
+   "discovery_strategy": "replatform",
+   "assessment_inputs": {
+    "cicd_target": "codepipeline",
+    "vpc_cidr": "10.40.0.0/16",
+    "target_compute": "ecs_fargate",
+    "target_database": "rds_mysql",
+    "db_instance_class": "db.t4g.medium"
+   }
+  },
+  "APP-PETCLINIC-EC2": {
+   "create": {
+    "app_name": "PetClinic (rehost)",
+    "business_unit": "Operations",
+    "language": "Java",
+    "framework": "Spring Boot 2.3",
+    "architecture": "monolith",
+    "description": "Spring PetClinic executable JAR, Spring Boot 2.3 / Java 8, MySQL, on a VM. Rehost to EC2 (AL2023 + Corretto) + RDS MySQL.",
+    "repos": [
+     {
+      "name": "aws-ecs-cicd-terraform",
+      "url": "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/aws-ecs-cicd-terraform",
+      "branch": "atx-run7",
+      "language": "Java"
+     }
+    ],
+    "tier": "tier_3",
+    "compliance": [
+     "none"
+    ],
+    "rpo": "4 hours",
+    "rto": "8 hours",
+    "uptime_sla": "99.9%",
+    "target_region": "us-east-1",
+    "data_classification": "internal",
+    "deployment_method": "manual",
+    "owners": [
+     {
+      "name": "AMF Test",
+      "email": "amf-test@example.com",
+      "role": "tech_lead"
+     }
+    ]
+   },
+   "put": {
+    "repos": [
+     {
+      "name": "aws-ecs-cicd-terraform",
+      "url": "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/aws-ecs-cicd-terraform",
+      "branch": "atx-run7",
+      "language": "Java"
+     }
+    ],
+    "current_compute": "on-prem VM (Java 8)",
+    "database": "MySQL",
+    "build_dir": "petclinic"
+   },
+   "discovery_strategy": "rehost",
+   "assessment_inputs": {
+    "cicd_target": "codepipeline",
+    "vpc_cidr": "10.40.0.0/16",
+    "target_compute": "ec2",
+    "target_database": "rds_mysql",
+    "ami_id": "al2023",
+    "db_instance_class": "db.t4g.medium"
+   }
+  },
+  "APP-PETCLINIC-RELO": {
+   "create": {
+    "app_name": "PetClinic (relocate)",
+    "business_unit": "Operations",
+    "language": "Java",
+    "framework": "Spring Boot 2.3",
+    "architecture": "monolith",
+    "description": "Spring PetClinic executable JAR, Spring Boot 2.3 / Java 8, embedded H2 by default. Relocate to EC2, keep the database as-is.",
+    "repos": [
+     {
+      "name": "aws-apprunner-terraform",
+      "url": "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/aws-apprunner-terraform",
+      "branch": "atx-run7",
+      "language": "Java"
+     }
+    ],
+    "tier": "tier_3",
+    "compliance": [
+     "none"
+    ],
+    "rpo": "4 hours",
+    "rto": "8 hours",
+    "uptime_sla": "99.9%",
+    "target_region": "us-east-1",
+    "data_classification": "internal",
+    "deployment_method": "manual",
+    "owners": [
+     {
+      "name": "AMF Test",
+      "email": "amf-test@example.com",
+      "role": "tech_lead"
+     }
+    ]
+   },
+   "put": {
+    "repos": [
+     {
+      "name": "aws-apprunner-terraform",
+      "url": "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/aws-apprunner-terraform",
+      "branch": "atx-run7",
+      "language": "Java"
+     }
+    ],
+    "current_compute": "VMware VM",
+    "database": "H2 (embedded) / MySQL",
+    "build_dir": "petclinic"
+   },
+   "discovery_strategy": "relocate",
+   "assessment_inputs": {
+    "cicd_target": "codepipeline",
+    "vpc_cidr": "10.40.0.0/16",
+    "target_compute": "ec2",
+    "target_database": "same_as_source",
+    "ami_id": "al2023"
+   }
+  },
+  "APP-CDK": {
+   "create": {
+    "app_name": "CDK sample catalogue",
+    "business_unit": "Platform",
+    "language": "Multi",
+    "framework": "AWS CDK",
+    "architecture": "n/a",
+    "description": "About 250 independent CDK samples, not a running application. Retire (close-out path).",
+    "repos": [
+     {
+      "name": "aws-cdk-examples",
+      "url": "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/aws-cdk-examples",
+      "branch": "atx-run7",
+      "language": "Multi"
+     }
+    ],
+    "tier": "tier_3",
+    "compliance": [
+     "none"
+    ],
+    "rpo": "4 hours",
+    "rto": "8 hours",
+    "uptime_sla": "99.9%",
+    "target_region": "us-east-1",
+    "data_classification": "internal",
+    "deployment_method": "manual",
+    "owners": [
+     {
+      "name": "AMF Test",
+      "email": "amf-test@example.com",
+      "role": "tech_lead"
+     }
+    ]
+   },
+   "put": {
+    "repos": [
+     {
+      "name": "aws-cdk-examples",
+      "url": "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/aws-cdk-examples",
+      "branch": "atx-run7",
+      "language": "Multi"
+     }
+    ],
+    "current_compute": "n/a",
+    "database": "n/a"
+   },
+   "discovery_strategy": "retire"
+  },
+  "APP-CARDDEMO": {
+   "create": {
+    "app_name": "CardDemo (mainframe)",
+    "business_unit": "Finance",
+    "language": "COBOL",
+    "framework": "CICS/VSAM/DB2",
+    "architecture": "mainframe",
+    "description": "COBOL credit-card management app on z/OS (CICS, VSAM, JCL). Retain on the mainframe for now (close-out path).",
+    "repos": [
+     {
+      "name": "aws-mainframe-modernization-carddemo",
+      "url": "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/aws-mainframe-modernization-carddemo",
+      "branch": "atx-run7",
+      "language": "COBOL"
+     }
+    ],
+    "tier": "tier_1",
+    "compliance": [
+     "none"
+    ],
+    "rpo": "4 hours",
+    "rto": "8 hours",
+    "uptime_sla": "99.9%",
+    "target_region": "us-east-1",
+    "data_classification": "internal",
+    "deployment_method": "manual",
+    "owners": [
+     {
+      "name": "AMF Test",
+      "email": "amf-test@example.com",
+      "role": "tech_lead"
+     }
+    ]
+   },
+   "put": {
+    "repos": [
+     {
+      "name": "aws-mainframe-modernization-carddemo",
+      "url": "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/aws-mainframe-modernization-carddemo",
+      "branch": "atx-run7",
+      "language": "COBOL"
+     }
+    ],
+    "current_compute": "IBM z/OS mainframe",
+    "database": "VSAM / DB2"
+   },
+   "discovery_strategy": "retain"
+  },
+  "APP-WORDPRESS": {
+   "create": {
+    "app_name": "Corporate site (WordPress)",
+    "business_unit": "Marketing",
+    "language": "PHP",
+    "framework": "WordPress",
+    "architecture": "monolith",
+    "description": "Self-hosted WordPress (LAMP). Repurchase: move to a managed/SaaS CMS (close-out path).",
+    "repos": [
+     {
+      "name": "aws-refarch-wordpress",
+      "url": "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/aws-refarch-wordpress",
+      "branch": "atx-run7",
+      "language": "PHP"
+     }
+    ],
+    "tier": "tier_3",
+    "compliance": [
+     "none"
+    ],
+    "rpo": "4 hours",
+    "rto": "8 hours",
+    "uptime_sla": "99.9%",
+    "target_region": "us-east-1",
+    "data_classification": "internal",
+    "deployment_method": "manual",
+    "owners": [
+     {
+      "name": "AMF Test",
+      "email": "amf-test@example.com",
+      "role": "tech_lead"
+     }
+    ]
+   },
+   "put": {
+    "repos": [
+     {
+      "name": "aws-refarch-wordpress",
+      "url": "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/aws-refarch-wordpress",
+      "branch": "atx-run7",
+      "language": "PHP"
+     }
+    ],
+    "current_compute": "on-prem LAMP VM",
+    "database": "MySQL"
+   },
+   "discovery_strategy": "repurchase"
+  }
+ }
+}

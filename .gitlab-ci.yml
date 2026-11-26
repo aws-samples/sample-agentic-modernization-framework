@@ -1,0 +1,194 @@
+# CI pipeline — validate, test, security scan.
+# CD disabled until UAT environment is ready.
+
+# Pull in the shared pipeline variables (AWS_REGION, SECURITY_REPORTS_BUCKET,
+# AWS_ACCOUNT_ID, …). Without this the upload-security-report job's
+# `--region ${AWS_REGION}` resolves to empty and the aws CLI errors.
+include:
+  - local: '.gitlab/ci/variables.yml'
+
+stages:
+  - validate
+  - test
+  - security
+  - upload
+
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_BRANCH == "dev"'
+    - if: '$CI_COMMIT_BRANCH =~ /^feature\/.*$/'
+
+# ── 1. Validate ───────────────────────────────────────────────────────────
+# Every job here is blocking. Run the same commands locally before pushing
+# (see CLAUDE.md "Commands").
+
+validate:python:
+  stage: validate
+  image: public.ecr.aws/docker/library/python:3.12-slim
+  script:
+    - pip install --quiet "ruff==0.15.18"   # pinned: new ruff releases add rules
+    - ruff check backend/src backend/tests
+
+validate:typescript:
+  stage: validate
+  image: public.ecr.aws/docker/library/node:20-alpine
+  cache:
+    key:
+      files: [frontend/pnpm-lock.yaml]
+    paths: [frontend/node_modules/]
+  before_script:
+    - corepack enable && corepack prepare pnpm@10.32.0 --activate
+  script:
+    - cd frontend && pnpm install --frozen-lockfile && pnpm exec tsc --noEmit
+
+validate:terraform:
+  stage: validate
+  image:
+    name: public.ecr.aws/hashicorp/terraform:1.10
+    entrypoint: [""]
+  script:
+    - terraform fmt -check -recursive infra
+    - cd infra/environments/agentcore
+    - terraform init -backend=false -input=false
+    - terraform validate
+
+
+# ── 2. Test ───────────────────────────────────────────────────────────────
+
+test:unit:
+  stage: test
+  image: public.ecr.aws/docker/library/python:3.12-slim
+  before_script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends git
+    - apt-get clean
+  script:
+    - pip install --quiet -e ".[dev]"
+    - python -m pytest backend/tests/unit/ -q --tb=short --junitxml=report.xml
+  artifacts:
+    reports:
+      junit: report.xml
+    when: always
+
+test:lambda:
+  stage: test
+  image: public.ecr.aws/docker/library/python:3.12-slim
+  script:
+    - pip install --quiet -e ".[dev]"
+    - cd infra/environments/agentcore/lambda-src
+    - python -m pytest -q --tb=short --junitxml=report.xml
+  artifacts:
+    reports:
+      junit: infra/environments/agentcore/lambda-src/report.xml
+    when: always
+
+test:frontend:
+  stage: test
+  image: public.ecr.aws/docker/library/node:20-alpine
+  cache:
+    key:
+      files: [frontend/pnpm-lock.yaml]
+    paths: [frontend/node_modules/]
+  before_script:
+    - corepack enable && corepack prepare pnpm@10.32.0 --activate
+  script:
+    - cd frontend && pnpm install --frozen-lockfile && pnpm test
+
+# ── 3. Security — ASH (Automated Security Helper) ─────────────────────────
+
+ash-sast:
+  stage: security
+  needs: []
+  image: public.ecr.aws/docker/library/python:3.12-slim
+  variables:
+    GIT_DEPTH: "0"
+    KUBERNETES_CPU_REQUEST: "4"
+    KUBERNETES_CPU_LIMIT: "4"
+    KUBERNETES_MEMORY_REQUEST: "8Gi"
+    KUBERNETES_MEMORY_LIMIT: "8Gi"
+    KUBERNETES_EPHEMERAL_STORAGE_REQUEST: "8Gi"
+    KUBERNETES_EPHEMERAL_STORAGE_LIMIT: "8Gi"
+  before_script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends git
+    - apt-get clean
+    - pip install --quiet "git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
+    - ash --version
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: on_success
+    # The GitLab Vulnerability Report tracks the DEFAULT branch: without a full scan on it,
+    # findings fixed on main never auto-resolve and the report goes stale.
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      when: on_success
+    - if: '$CI_COMMIT_BRANCH == "dev"'
+      when: on_success
+    - if: '$CI_COMMIT_BRANCH =~ /^feature\/.*$/'
+      when: on_success
+  allow_failure: false
+  script:
+    - |
+      ash --no-color config validate --config ash_config.yaml
+      if [ "${CI_PIPELINE_SOURCE}" = "merge_request_event" ]; then
+        test -n "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}"
+        git fetch --no-tags origin "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}"
+        BASE_REF=$(git merge-base HEAD "origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}")
+        test -n "${BASE_REF}"
+        echo "Scanning merge-request changes from ${BASE_REF}"
+        ash --config ash_config.yaml --output-dir .ash/ash_output \
+          --changed-files-only --base-ref "${BASE_REF}"
+      else
+        ash --config ash_config.yaml --output-dir .ash/ash_output
+      fi
+  after_script:
+    - ash report
+  artifacts:
+    paths:
+      - .ash/ash_output
+    when: always
+    expire_in: 30 days
+    reports:
+      junit: .ash/ash_output/reports/ash.junit.xml
+      cyclonedx: .ash/ash_output/reports/ash.cdx.json
+      sast: .ash/ash_output/reports/ash.gl-sast-report.json
+
+# ── 4. Upload security reports to S3 ──────────────────────────────────────
+
+upload-security-report:
+  stage: upload
+  needs:
+    - job: ash-sast
+      artifacts: true
+  image: public.ecr.aws/aws-cli/aws-cli:latest
+  # The runner vends AWS credentials for the job only when AWS_CREDS_TARGET_ROLE
+  # is set; without it the aws s3 cp fails with "Unable to locate credentials".
+  # Point it at the CI role (defined in variables.yml) that can write the bucket.
+  variables:
+    AWS_CREDS_TARGET_ROLE: "${AWS_ROLE_ARN}"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      when: on_success
+    - if: '$CI_COMMIT_BRANCH == "dev"'
+      when: on_success
+    - if: '$CI_COMMIT_BRANCH =~ /^feature\/.*$/'
+      when: on_success
+  # The copy to S3 is secondary — the ASH results are already GitLab artifacts and
+  # the MR security report — so a missing role trust must not fail the pipeline.
+  allow_failure: true
+  script:
+    - |
+      if ! aws sts get-caller-identity --region "${AWS_REGION:-us-east-1}" >/dev/null 2>&1; then
+        echo "WARNING: no AWS credentials for ${AWS_ROLE_ARN} (the role's trust policy must allow"
+        echo "this project: ${CI_PROJECT_PATH}). Skipping the S3 copy; reports are in the job artifacts."
+        exit 0
+      fi
+    - REPORT_DATE=$(date +%Y-%m-%d)
+    - BRANCH_NAME=$(echo "${CI_COMMIT_BRANCH}" | sed 's|/|_|g')
+    - |
+      aws s3 cp .ash/ash_output/ \
+        "s3://${SECURITY_REPORTS_BUCKET}/${CI_PROJECT_NAME}/${BRANCH_NAME}/${REPORT_DATE}/${CI_COMMIT_SHORT_SHA}/" \
+        --recursive \
+        --region "${AWS_REGION:-us-east-1}"
+      echo "Security reports uploaded to s3://${SECURITY_REPORTS_BUCKET}/"

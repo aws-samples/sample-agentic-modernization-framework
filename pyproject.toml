@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "migration-framework"
+version = "0.1.0"
+description = "Large-scale AWS migration framework with AI-powered agents"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi==0.136.0",
+    "uvicorn[standard]==0.44.0",
+    "pydantic>=2.13,<3.0",
+    "pydantic-settings>=2.14,<3.0",
+    "boto3>=1.42,<2.0",
+    "python-jose[cryptography]==3.5.0",
+    "httpx>=0.28,<1.0",
+    # Required by FastAPI for any route taking UploadFile/Form — the discovery
+    # CSV upload does. Without it the app raises at IMPORT time, so a container
+    # built from this project cannot start at all. It only appeared to work in
+    # local dev because a pre-existing venv already had it installed.
+    "python-multipart>=0.0.9,<0.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "moto[dynamodb,s3]",
+    "ruff",
+    "mypy",
+    "bandit",
+    "checkov",
+    "pytest-asyncio",
+    "pytest-cov",
+]
+
+# Run dev server with: uvicorn backend.src.main:app --reload --host 0.0.0.0 --port 8000
+
+[tool.setuptools.packages.find]
+include = ["backend*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501", "E402", "F841"]  # E501=long lines, E402=import order in main.py, F841=unused vars (intentional extractions)
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["backend/tests"]
+
+[tool.bandit]
+exclude_dirs = ["backend/tests"]
