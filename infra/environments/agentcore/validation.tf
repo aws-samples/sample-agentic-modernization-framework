@@ -12,7 +12,8 @@
 ################################################################################
 
 resource "aws_iam_role" "validation_probe" {
-  name = "${var.project_prefix}-validation-probe-role"
+  name        = "${var.project_prefix}-validation-probe-role"
+  description = "AMF in-VPC validation probe Lambda: smoke-tests a deployed app's internal endpoint."
   assume_role_policy = jsonencode({
     Version   = "2012-10-17"
     Statement = [{ Effect = "Allow", Principal = { Service = "lambda.amazonaws.com" }, Action = "sts:AssumeRole" }]

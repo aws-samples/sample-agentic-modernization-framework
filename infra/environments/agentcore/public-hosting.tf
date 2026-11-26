@@ -266,6 +266,10 @@ resource "aws_ecs_service" "api" {
   desired_count   = var.api_desired_count
   launch_type     = "FARGATE"
 
+  # Tasks carry the service's tags (default_tags) and the ECS-managed cluster/service tags.
+  propagate_tags          = "SERVICE"
+  enable_ecs_managed_tags = true
+
   network_configuration {
     subnets = aws_subnet.public[*].id
     # Public IP is required for image pull without a NAT gateway.

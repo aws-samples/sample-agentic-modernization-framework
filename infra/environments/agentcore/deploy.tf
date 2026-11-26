@@ -57,6 +57,7 @@ data "aws_iam_policy_document" "deploy_trust" {
 resource "aws_iam_role" "deploy" {
   count                = local.deploy
   name                 = "${var.project_prefix}-deploy-role"
+  description          = "AMF deploy role: the worker assumes it to terraform-apply a human-approved app commit (only when enable_deploy is true)."
   assume_role_policy   = data.aws_iam_policy_document.deploy_trust.json
   max_session_duration = 7200 # apply + first pipeline run
 }

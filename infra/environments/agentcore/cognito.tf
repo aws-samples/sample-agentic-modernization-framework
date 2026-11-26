@@ -24,6 +24,16 @@ variable "enable_cognito" {
   default     = false
 }
 
+variable "cognito_mfa" {
+  description = "Portal MFA (TOTP): OPTIONAL (default, sandbox PoC) or ON (every user must enrol; recommended for a shared hosted demo)."
+  type        = string
+  default     = "OPTIONAL"
+  validation {
+    condition     = contains(["OPTIONAL", "ON"], var.cognito_mfa)
+    error_message = "cognito_mfa must be OPTIONAL or ON."
+  }
+}
+
 variable "admin_email" {
   description = "Email (and username) of the seed Cognito admin user, added to the Admin group."
   type        = string
@@ -75,8 +85,9 @@ resource "aws_cognito_user_pool" "portal" {
   username_attributes      = ["email"]
   auto_verified_attributes = ["email"]
 
-  # Users may enrol a TOTP authenticator app; not forced on existing accounts.
-  mfa_configuration = "OPTIONAL"
+  # TOTP authenticator MFA. OPTIONAL (default) keeps a sandbox PoC simple; set
+  # cognito_mfa = "ON" for any hosted demo that other people sign in to.
+  mfa_configuration = var.cognito_mfa
   software_token_mfa_configuration {
     enabled = true
   }

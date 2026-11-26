@@ -184,7 +184,8 @@ resource "aws_cloudwatch_log_group" "assessment" {
 
 # Task role — needs DynamoDB, S3, Bedrock, Transform access
 resource "aws_iam_role" "worker_task" {
-  name = "${var.project_prefix}-worker-task-role"
+  name        = "${var.project_prefix}-worker-task-role"
+  description = "AMF ECS worker and API task role: AWS Transform analysis, repo commits, terraform validate and plan."
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{

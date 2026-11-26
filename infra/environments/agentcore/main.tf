@@ -43,13 +43,21 @@ terraform {
 provider "aws" {
   region = var.aws_region
 
+  # Every taggable resource gets these; ECS tasks and the API service inherit them
+  # (propagateTags). Add your own (owner, cost-center, ...) with var.extra_tags.
   default_tags {
-    tags = {
+    tags = merge(var.extra_tags, {
       project     = var.project_prefix
       environment = "agentcore"
       managed_by  = "terraform"
-    }
+    })
   }
+}
+
+variable "extra_tags" {
+  description = "Additional tags for every AMF resource (for example owner, cost-center). project, environment and managed_by are always set."
+  type        = map(string)
+  default     = {}
 }
 
 data "aws_caller_identity" "current" {}
@@ -91,7 +99,8 @@ module "dynamodb" {
 # ── Lambda MCP Tools (no VPC needed — no Neptune) ────────────────────
 
 resource "aws_iam_role" "tool_lambda" {
-  name = "${var.project_prefix}-agentcore-tool-role"
+  name        = "${var.project_prefix}-agentcore-tool-role"
+  description = "AMF MCP Gateway tool Lambdas (portfolio, strategy, planning, documents, execution)."
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -137,7 +146,8 @@ resource "aws_iam_role_policy" "tool_lambda_policy" {
 # ── AgentCore Gateway (MCP Protocol) ─────────────────────────────────
 
 resource "aws_iam_role" "gateway_role" {
-  name = "${var.project_prefix}-agentcore-gateway-role"
+  name        = "${var.project_prefix}-agentcore-gateway-role"
+  description = "AMF AgentCore MCP Gateway: invokes the AMF tool Lambdas."
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -294,7 +304,8 @@ locals {
 # ── IAM: Agent/Harness Execution Role ────────────────────────────────
 
 resource "aws_iam_role" "agent_runtime_role" {
-  name = "${var.project_prefix}-agentcore-runtime-role"
+  name        = "${var.project_prefix}-agentcore-runtime-role"
+  description = "AMF AgentCore Harness runtime: calls this deployment's MCP Gateway and the Bedrock model."
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"

@@ -433,6 +433,13 @@ resource "aws_iam_role_policy" "tool_lambda_s3_ecs" {
         ]
       },
       {
+        # RunTask with propagateTags tags the new task; only as part of RunTask.
+        Effect    = "Allow"
+        Action    = ["ecs:TagResource"]
+        Resource  = "arn:${local.partition}:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:task/*"
+        Condition = { StringEquals = { "ecs:CreateAction" = "RunTask" } }
+      },
+      {
         # RunTask of the worker task definition passes exactly its two roles.
         # The probe role is passed to Lambda in validation.tf.
         Effect   = "Allow"
@@ -560,7 +567,8 @@ data "archive_file" "invoke_runtime_zip" {
 }
 
 resource "aws_iam_role" "invoke_runtime_role" {
-  name = "${var.project_prefix}-invoke-runtime-role"
+  name        = "${var.project_prefix}-invoke-runtime-role"
+  description = "AMF invoke_runtime Lambda: phase pre-hooks, post-checks and approval-gate task tokens for the Step Functions workflow."
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"

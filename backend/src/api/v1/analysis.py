@@ -34,7 +34,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 s3 = aws.client("s3")
-BUCKET = settings.get_s3_bucket()
+def _bucket() -> str:
+    """Resolved on use, not at import (no STS call when the module loads)."""
+    return settings.get_s3_bucket()
 
 # ── S3 Backfill Helper ─────────────────────────────────────────────────
 
@@ -49,7 +51,7 @@ def _backfill_from_s3(app_id: str, analysis_type: str, table) -> list:
 
     try:
         prefix = f"applications/{app_id}/analysis/{analysis_type}/"
-        resp = s3.list_objects_v2(Bucket=BUCKET, Prefix=prefix, Delimiter="/")
+        resp = s3.list_objects_v2(Bucket=_bucket(), Prefix=prefix, Delimiter="/")
         run_prefixes = resp.get("CommonPrefixes", [])
 
         if not run_prefixes:
@@ -78,24 +80,24 @@ def _backfill_from_s3(app_id: str, analysis_type: str, table) -> list:
 
             for s3_key, field_name in file_map.items():
                 try:
-                    obj = s3.get_object(Bucket=BUCKET, Key=run_path + s3_key)
+                    obj = s3.get_object(Bucket=_bucket(), Key=run_path + s3_key)
                     data[field_name] = obj["Body"].read().decode("utf-8")[:settings.atx_doc_max_chars]
                 except Exception as _err:
                     logger.debug("best-effort step ignored: %s", _err)
 
             # Check for report.md / report.json
             try:
-                objs = s3.list_objects_v2(Bucket=BUCKET, Prefix=run_path, MaxKeys=settings.atx_run_list_max_keys)
+                objs = s3.list_objects_v2(Bucket=_bucket(), Prefix=run_path, MaxKeys=settings.atx_run_list_max_keys)
                 for obj_info in objs.get("Contents", []):
                     key = obj_info["Key"]
                     if (key.endswith("-report.md") or key.endswith("/report.md")) and "ATXDocumentation" not in key:
                         data["report_md"] = (
-                            s3.get_object(Bucket=BUCKET, Key=key)["Body"].read().decode("utf-8")
+                            s3.get_object(Bucket=_bucket(), Key=key)["Body"].read().decode("utf-8")
                             [:settings.atx_report_view_max_chars]
                         )
                     if (key.endswith("-report.json") or key.endswith("/report.json")) and "ATXDocumentation" not in key:
                         data["report_json"] = (
-                            s3.get_object(Bucket=BUCKET, Key=key)["Body"].read().decode("utf-8")
+                            s3.get_object(Bucket=_bucket(), Key=key)["Body"].read().decode("utf-8")
                             [:settings.atx_report_view_max_chars]
                         )
             except Exception as _err:
@@ -114,7 +116,7 @@ def _backfill_from_s3(app_id: str, analysis_type: str, table) -> list:
                 "analysis_type": analysis_type,
                 "run_id": run_id,
                 "timestamp": now,
-                "s3_prefix": f"s3://{BUCKET}/{run_path}",
+                "s3_prefix": f"s3://{_bucket()}/{run_path}",
                 "status": "completed",
                 "data": data,
                 "backfilled": True,
@@ -391,25 +393,25 @@ def get_analysis_html_report(app_id: str, analysis_type: str):
 
         # Determine S3 prefix
         if s3_prefix and s3_prefix.startswith("s3://"):
-            bucket_prefix = s3_prefix.replace(f"s3://{BUCKET}/", "")
+            bucket_prefix = s3_prefix.replace(f"s3://{_bucket()}/", "")
         else:
             bucket_prefix = f"applications/{app_id}/analysis/{analysis_type}/{run_id}/"
 
         # List objects — find .html first, then .md files
-        resp_s3 = s3.list_objects_v2(Bucket=BUCKET, Prefix=bucket_prefix, MaxKeys=100)
+        resp_s3 = s3.list_objects_v2(Bucket=_bucket(), Prefix=bucket_prefix, MaxKeys=100)
         objects = resp_s3.get("Contents", [])
 
         # Try HTML first
         for obj in objects:
             if obj["Key"].endswith(".html"):
-                html_obj = s3.get_object(Bucket=BUCKET, Key=obj["Key"])
+                html_obj = s3.get_object(Bucket=_bucket(), Key=obj["Key"])
                 return _html(html_obj["Body"].read().decode("utf-8"))
 
         # Fall back to markdown — concatenate all .md files and render as HTML
         md_contents = []
         for obj in sorted(objects, key=lambda x: x["Key"]):
             if obj["Key"].endswith(".md"):
-                md_obj = s3.get_object(Bucket=BUCKET, Key=obj["Key"])
+                md_obj = s3.get_object(Bucket=_bucket(), Key=obj["Key"])
                 md_text = md_obj["Body"].read().decode("utf-8")
                 md_contents.append(md_text)
 

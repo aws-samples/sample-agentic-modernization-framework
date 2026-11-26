@@ -327,3 +327,32 @@ def test_codebuild_logs_are_scoped_to_the_projects_log_group():
     stmt = tf[i:tf.index("},", i)]
     assert 'Resource = "*"' not in stmt
     assert "log-group:/aws/codebuild/${local.name}-build" in stmt and "log-group:/aws/codebuild/${local.name}-build:*" in stmt
+
+
+# ── Platform roles are described; RunTask tagging stays scoped ───────────
+
+
+def _platform_tf():
+    for tf in sorted(list(ENV_DIR.glob("*.tf")) + list((REPO_ROOT / "infra" / "modules").glob("*/main.tf"))):
+        yield tf, tf.read_text()
+
+
+def test_every_platform_iam_role_has_a_description():
+    found = 0
+    for tf, text in _platform_tf():
+        for name, body in _resource_blocks(text, "aws_iam_role"):
+            found += 1
+            m = re.search(r'^\s*description\s*=\s*"([^"]+)"', body, re.M)
+            assert m, f"{tf.name}: aws_iam_role.{name} has no description"
+            assert all(ord(c) < 127 for c in m.group(1)), f"{tf.name}: {name} description must be ASCII (IAM)"
+    assert found >= 9
+
+
+def test_ecs_tag_resource_only_as_part_of_run_task():
+    text = (ENV_DIR / "lambdas.tf").read_text()
+    assert text.count('"ecs:TagResource"') == 1, "expected exactly one ecs:TagResource statement"
+    i = text.index('"ecs:TagResource"')
+    stmt = text[text.rindex("{", 0, i):text.index("Condition", i)]
+    cond = text[text.index("Condition", i):].split("\n", 1)[0]
+    assert '"ecs:CreateAction" = "RunTask"' in cond
+    assert ":task/*" in stmt and 'Resource  = "*"' not in stmt

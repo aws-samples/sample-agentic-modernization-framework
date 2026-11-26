@@ -2121,6 +2121,9 @@ def _launch_ecs_task(job_id, app_id, mode, td_name, target_version="", task_toke
                     cluster=ECS_CLUSTER,
                     taskDefinition=ECS_TASK_DEF,
                     launchType="FARGATE",
+                    # Worker tasks carry the task definition's tags (Terraform default_tags).
+                    propagateTags="TASK_DEFINITION",
+                    enableECSManagedTags=True,
                     overrides={"containerOverrides": [{"name": WORKER_CONTAINER_NAME, "environment": env}]},
                     networkConfiguration={"awsvpcConfiguration": {"subnets": ECS_SUBNETS, "assignPublicIp": ECS_ASSIGN_PUBLIC_IP}},
                 )

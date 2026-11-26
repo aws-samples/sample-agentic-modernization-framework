@@ -223,7 +223,9 @@ def _invoke_harness(app_id: str, prompt: str, session_id: str) -> dict:
 import json
 
 _s3 = aws.client("s3")
-_BUCKET = settings.get_s3_bucket()
+def _bucket() -> str:
+    """Resolved on use, not at import (no STS call when the module loads)."""
+    return settings.get_s3_bucket()
 _SESSION_PREFIX = "chat-sessions"
 
 
@@ -231,7 +233,7 @@ def _load_session(session_id: str) -> list:
     """Load conversation history from S3."""
     try:
         key = f"{_SESSION_PREFIX}/{session_id}.json"
-        resp = _s3.get_object(Bucket=_BUCKET, Key=key)
+        resp = _s3.get_object(Bucket=_bucket(), Key=key)
         data = json.loads(resp["Body"].read().decode("utf-8"))
         return data.get("messages", [])
     except _s3.exceptions.NoSuchKey:
@@ -259,7 +261,7 @@ def _save_session(session_id: str, messages: list):
                 serializable.append({"role": "assistant", "content": [{"text": str(msg)}]})
 
         _s3.put_object(
-            Bucket=_BUCKET,
+            Bucket=_bucket(),
             Key=key,
             Body=json.dumps({"session_id": session_id, "messages": serializable}, default=str).encode("utf-8"),
             ContentType="application/json",

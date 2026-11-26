@@ -3,6 +3,8 @@ Application configuration via pydantic-settings.
 All values can be overridden by environment variables or .env file.
 """
 
+import contextlib
+
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
 
@@ -271,7 +273,11 @@ class Settings(BaseSettings):
     _cached_bucket: str = ""
 
     def get_s3_bucket(self) -> str:
-        """Resolve bucket name. Uses s3_bucket env var if set, otherwise derives from account ID."""
+        """The data bucket: S3_BUCKET if set (setup.sh, Terraform), else derived from this account.
+
+        The derived name needs the account ID. If STS can't supply it, this raises instead of
+        guessing an account-less name, which could belong to another account.
+        """
         if self.s3_bucket:
             return self.s3_bucket
         if self._cached_bucket:
@@ -279,13 +285,11 @@ class Settings(BaseSettings):
         try:
             import boto3
             account_id = boto3.client("sts", region_name=self.aws_region).get_caller_identity()["Account"]
-            self._cached_bucket = f"{self.project_prefix}-data-{account_id}-{self.aws_region}"
-        except Exception:
-            # Transient STS failure (e.g. creds not ready at container startup).
-            # Do NOT cache — an account-less bucket name is wrong and would poison
-            # every later S3 read for the life of the process. Return a best-effort
-            # value WITHOUT caching so the next call retries once STS recovers.
-            return f"{self.project_prefix}-data-{self.aws_region}"
+        except Exception as err:
+            raise RuntimeError(
+                "S3_BUCKET is not set and the account ID could not be read from STS; "
+                "set S3_BUCKET (scripts/setup.sh writes it to .env)") from err
+        self._cached_bucket = f"{self.project_prefix}-data-{account_id}-{self.aws_region}"
         # Set on the instance so direct .s3_bucket access also works
         object.__setattr__(self, "s3_bucket", self._cached_bucket)
         return self._cached_bucket
@@ -294,5 +298,7 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-# Resolve S3 bucket at startup (derives from account ID if not set in env)
-settings.get_s3_bucket()
+# Resolve the S3 bucket at startup when possible; if STS isn't ready yet, the first S3 use retries
+# (and fails clearly if it still can't).
+with contextlib.suppress(RuntimeError):
+    settings.get_s3_bucket()

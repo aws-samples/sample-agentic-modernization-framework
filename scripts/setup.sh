@@ -39,6 +39,7 @@ TF_DIR="$PROJECT_ROOT/infra/environments/agentcore"
 # ── Public hosting / auth toggles (opt-in; e.g. for a UAT deployment) ──
 #   ENABLE_PUBLIC_HOSTING=true  → CloudFront + ALB + S3 site, builds & deploys the UI
 #   ENABLE_COGNITO=true         → Cognito user pool + Admin group + seed admin (defaults to hosting)
+#   COGNITO_MFA=ON              → require TOTP MFA for every portal user (default OPTIONAL)
 #   ADMIN_EMAIL=you@corp.com    → seed admin username/email
 #   GRAPH_BACKEND=dynamodb|neptune|none → graph store for the hosted API (default dynamodb):
 #       neptune  → provisions Neptune Serverless (private subnets, IAM auth)
@@ -163,7 +164,7 @@ if [[ "$ENABLE_PUBLIC_HOSTING" == "true" ]]; then
     -var="portal_acm_certificate_arn=${PORTAL_ACM_CERTIFICATE_ARN}")
 fi
 if [[ "$ENABLE_COGNITO" == "true" ]]; then
-  TF_VARS+=(-var="enable_cognito=true" -var="admin_email=${ADMIN_EMAIL}")
+  TF_VARS+=(-var="enable_cognito=true" -var="admin_email=${ADMIN_EMAIL}" -var="cognito_mfa=${COGNITO_MFA:-OPTIONAL}")
 fi
 TF_VARS+=(-var="graph_backend=${GRAPH_BACKEND}" -var="enable_deploy=${ENABLE_DEPLOY}")
 if [[ -n "$CLOUDFRONT_ALLOWED_CIDRS" ]]; then

@@ -25,7 +25,8 @@ variable "approval_timeout_seconds" {
 # ── Execution role ────────────────────────────────────────────────────
 
 resource "aws_iam_role" "sfn" {
-  name = "${var.project_prefix}-sfn-role"
+  name        = "${var.project_prefix}-sfn-role"
+  description = "AMF migration workflow state machine: invokes the Harness and the AMF Lambdas, writes its logs."
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"

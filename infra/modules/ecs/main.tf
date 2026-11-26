@@ -53,7 +53,8 @@ resource "aws_cloudwatch_log_group" "ecs" {
 
 # IAM role for ECS task execution (pulling images, writing logs)
 resource "aws_iam_role" "ecs_execution" {
-  name = "${var.project_prefix}-ecs-execution"
+  name        = "${var.project_prefix}-ecs-execution"
+  description = "AMF ECS task execution role: pulls the worker/API image and writes container logs."
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
