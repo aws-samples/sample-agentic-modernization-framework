@@ -69,7 +69,7 @@ See [docs/architecture.md](docs/architecture.md) for the full flow and data mode
   - Pre-hooks (Discovery, Assessment, Design, Execution) fail fast on missing inputs.
   - Post-checks (Discovery, Assessment, Design, close-out) re-run the phase once with the
     contradictions found, then fail the run.
-- **7 approval gates.** Each gate has a decision summary computed in code (what changed, risk,
+- *** approval gates.** Each gate has a decision summary computed in code (what changed, risk,
   consequences of approve, reject and retry). Reviewer comments flow into the re-run, and
   missing fields can be filled in at the gate. Approvals are audited per run (`APPROVAL_AUDIT#`).
 - **Execution.** Runs in sequence:
